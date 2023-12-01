@@ -29,8 +29,6 @@ public:
     linglong::utils::error::Result<void> importDirectory(const package::Ref &ref,
                                                          const QString &path) override;
 
-    linglong::utils::error::Result<void> push(const package::Ref &ref, bool force) override;
-
     linglong::utils::error::Result<void> push(const package::Ref &ref) override;
 
     linglong::utils::error::Result<void> pull(package::Ref &ref, bool force) override;

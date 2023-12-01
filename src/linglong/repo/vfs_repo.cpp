@@ -59,11 +59,6 @@ linglong::utils::error::Result<void> VfsRepo::importDirectory(const package::Ref
     return {};
 }
 
-linglong::utils::error::Result<void> VfsRepo::push(const package::Ref &ref, bool force)
-{
-    return {};
-}
-
 linglong::utils::error::Result<void> VfsRepo::push(const package::Ref &ref)
 {
     return {};

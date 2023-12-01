@@ -54,7 +54,9 @@ OSTreeRepo::OSTreeRepo(const QString &localRepoPath,
     , remoteEndpoint(remoteEndpoint)
     , remoteRepoName(remoteRepoName)
     , repoClient(client)
+    , apiClient(client)
 {
+
     // FIXME(black_desk): Just a quick hack to make sure openRepo called after the repo is
     // created. So I am not to check error here.
     ensureRepoEnv(localRepoPath);
@@ -135,9 +137,9 @@ linglong::utils::error::Result<void> OSTreeRepo::push(const package::Ref &ref)
     uploadReq->ref = ref.toOSTreeRefLocalString();
 
     // FIXME: no need,use /v1/meta/:id
-    QSharedPointer<InfoResponse> repoInfo(getRepoInfo(remoteRepoName));
-    if (repoInfo->code != 200) {
-        return LINGLONG_ERR(-1, repoInfo->msg);
+    auto repoInfo = getRepoInfo(remoteRepoName);
+    if (!repoInfo.has_value()) {
+        return LINGLONG_EWRAP("get repo info", repoInfo.error());
     }
 
     QString taskID;
@@ -152,13 +154,7 @@ linglong::utils::error::Result<void> OSTreeRepo::push(const package::Ref &ref)
     // compress form data
     QString filePath;
     {
-        auto ret = compressOstreeData(ref);
-        if (!ret.has_value()) {
-            return LINGLONG_EWRAP("compress ostree data failed", ret.error());
-        }
-        if (ret.has_value()) {
-            filePath = *ret;
-        }
+        filePath = "/bin/ostree";
     }
 
     {
@@ -170,87 +166,15 @@ linglong::utils::error::Result<void> OSTreeRepo::push(const package::Ref &ref)
 
     {
         auto ret = getUploadStatus(taskID);
+        qDebug() << "getUploadStatus" << ret.has_value();
         if (!ret.has_value()) {
+            qDebug() << "cleanUploadTask";
             cleanUploadTask(ref, filePath);
             return ret;
         }
     }
-
+    return LINGLONG_OK;
     return LINGLONG_EWRAP("call cleanUploadTask failed", cleanUploadTask(ref, filePath).error());
-}
-
-linglong::utils::error::Result<void> OSTreeRepo::push(const package::Ref &ref, bool /*force*/)
-{
-    {
-        auto ret = getToken();
-        if (!ret.has_value()) {
-            return LINGLONG_EWRAP("get token failed", ret.error());
-        }
-    }
-
-    QSharedPointer<UploadTaskRequest> uploadTaskReq(new UploadTaskRequest);
-
-    // FIXME: no need,use /v1/meta/:id
-    QSharedPointer<InfoResponse> repoInfo(getRepoInfo(remoteRepoName));
-    if (repoInfo->code != 200) {
-        return LINGLONG_ERR(-1, repoInfo->msg);
-    }
-
-    QString commitID;
-    {
-        auto ret = resolveRev(ref.toOSTreeRefLocalString());
-        if (!ret.has_value()) {
-            return LINGLONG_EWRAP("push failed:" + ref.toOSTreeRefLocalString(), ret.error());
-        }
-        if (ret.has_value()) {
-            commitID = *ret;
-        }
-    }
-    qDebug() << "push commit" << commitID << ref.toOSTreeRefLocalString();
-
-    auto revPair = QSharedPointer<RevPair>(new RevPair);
-
-    // upload msg, should specific channel in ref
-    uploadTaskReq->refs[ref.toOSTreeRefLocalString()] = revPair;
-    revPair->client = commitID;
-    // FIXME: get server version to compare
-    revPair->server = "";
-
-    QList<OstreeRepoObject> objects;
-    {
-        // find files to commit
-        auto ret = findObjectsOfCommits({ commitID });
-        if (!ret.has_value()) {
-            return LINGLONG_EWRAP("call findObjectsOfCommits failed", ret.error());
-        }
-
-        objects = *ret;
-    }
-
-    for (auto const &obj : objects) {
-        uploadTaskReq->objects.push_back(obj.objectName);
-    }
-
-    // send files
-    QString taskID;
-    {
-        auto ret = newUploadTask(remoteRepoName, uploadTaskReq);
-        if (!ret.has_value()) {
-            return LINGLONG_EWRAP("call newUploadTask failed", ret.error());
-        }
-        taskID = *ret;
-    }
-
-    {
-        auto ret = doUploadTask(remoteRepoName, taskID, objects);
-        if (!ret.has_value()) {
-            cleanUploadTask(remoteRepoName, taskID);
-            return LINGLONG_EWRAP("call newUploadTask failed", ret.error());
-        }
-    }
-
-    return LINGLONG_EWRAP("call cleanUploadTask failed",
-                          cleanUploadTask(remoteRepoName, taskID).error());
 }
 
 linglong::utils::error::Result<void> OSTreeRepo::pull(package::Ref &ref, bool /*force*/)

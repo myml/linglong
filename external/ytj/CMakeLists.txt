@@ -30,9 +30,9 @@ CPMFindPackage(
 
 CPMFindPackage(
   NAME yaml-cpp
-  VERSION 0.8.0
+  VERSION 0.7.0
   GITHUB_REPOSITORY jbeder/yaml-cpp
-  GIT_TAG 0.8.0
+  GIT_TAG 0.7.0
   GIT_SHALLOW ON
   GIT_PROGRESS ON
   EXCLUDE_FROM_ALL ON

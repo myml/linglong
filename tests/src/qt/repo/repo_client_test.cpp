@@ -22,7 +22,9 @@ private Q_SLOTS:
 void TestRepoClient::NetworkReply()
 {
     MockQNetworkAccessManager http;
-    http.setStatus(400);
+    connect(&http, &MockQNetworkAccessManager::onCreateRequest, [](MockReply *req) {
+        req->Bytes(400, "");
+    });
 
     ClientApi api;
     api.setNewServerForAllOperations(QUrl("https://testmock.deepin.org"));
@@ -38,12 +40,15 @@ void TestRepoClient::NetworkReply()
 void TestRepoClient::QueryApps()
 {
     MockQNetworkAccessManager http;
-    // 构造响应内容
-    Request_RegisterStruct reg;
-    reg.setAppId("org.deepin.music");
-    FuzzySearchApp_200_response data;
-    data.setCode(200);
-    data.setData({ reg });
+    connect(&http, &MockQNetworkAccessManager::onCreateRequest, [](MockReply *req) {
+        // 构造响应内容
+        Request_RegisterStruct reg;
+        reg.setAppId("org.deepin.music");
+        FuzzySearchApp_200_response data;
+        data.setCode(200);
+        data.setData({ reg });
+        req->JSON(200, data.asJsonObject());
+    });
 
     ClientApi api;
     api.setNewServerForAllOperations(QUrl("https://testmock.deepin.org"));
@@ -55,7 +60,6 @@ void TestRepoClient::QueryApps()
     auto ref = package::Ref("", appID, "", "x86_64");
 
     {
-        http.setBody(QJsonDocument(data.asJsonObject()));
         auto apps = client.QueryApps(ref);
         Q_ASSERT(apps.has_value());
         auto exists = false;

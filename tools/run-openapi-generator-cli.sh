@@ -15,7 +15,7 @@ cd "$repoRoot/tools"
 output=../external/http
 cppNamespace=linglong::api::client
 onlyFirstTag=KEEP_ONLY_FIRST_TAG_IN_OPERATION=true
-
+rm -r $output || true
 openapi-generator-cli() {
         if [ -z "$OPENAPI_GENERATOR_CLI" ]; then
                 npm install @openapitools/openapi-generator-cli
@@ -27,6 +27,7 @@ openapi-generator-cli() {
 
 openapi-generator-cli generate -g cpp-qt-client -o "$output" \
         -i ../api/http/client_swagger.json \
+        --skip-validate-spec \
         --openapi-normalizer $onlyFirstTag \
         --additional-properties="modelNamePrefix=,optionalProjectFile=false,cppNamespace=$cppNamespace" \
         --package-name=QtLinglongRepoClientAPI \

@@ -1,5 +1,5 @@
 Name:           linglong
-Version:        1.5.0
+Version:        1.7.0
 Release:        1
 Summary:        Linglong Package FrameWork 
 License:        LGPLv3
@@ -7,9 +7,11 @@ URL:            https://github.com/linuxdeepin/%{name}
 Source0:        %{url}/archive/%{version}/linglong-%{version}.tar.gz
 
 BuildRequires:  cmake gcc12-c++
-BuildRequires:  (qt5-qtbase-devel or libqt5-qtbase-devel) (qt5-qtwebsockets-devel or libqt5-qtwebsockets-devel) (qt5-qtbase-private-devel or libqt5-qtbase-private-headers-devel) 
-BuildRequires:  glib2-devel (nlohmann-json-devel or nlohmann_json-devel) ostree-devel yaml-cpp-devel
-BuildRequires:  systemd-devel gtest libseccomp-devel
+BuildRequires:  libqt5-qtbase-devel libqt5-qtbase-private-headers-devel
+BuildRequires:  glib2-devel nlohmann_json-devel ostree-devel yaml-cpp-devel
+BuildRequires:  systemd-devel gtest libseccomp-devel libelf-devel
+BuildRequires:  glibc-static
+BuildRequires:  libcurl-devel openssl-devel
 Requires:       linglong-bin = %{version}-%{release}
 
 %description
@@ -71,57 +73,60 @@ cd build
 %files -n linglong-bin
 %doc README.md
 %license LICENSE
-%dir %{_sysconfdir}/profile.d
+%dir /etc/X11/Xsession.d
+%dir /usr/lib/%{name}
+%dir /usr/lib/%{name}/container
+%dir /usr/lib/systemd/system-environment-generators
+%dir /usr/libexec
+%dir /usr/libexec/%{name}
+%dir /usr/share/%{name}
+%dir /usr/share/polkit-1
+%dir /usr/share/polkit-1/actions
 %{_sysconfdir}/profile.d/*
-%dir %{_sysconfdir}/X11/Xsession.d
 %{_sysconfdir}/X11/Xsession.d/*
 %{_bindir}/ll-cli
 %{_bindir}/llpkg
-%{_bindir}/linglong-repair-tool
-%{_bindir}/ll-package-manager
-%dir %{_prefix}/lib/%{name}
-%dir %{_prefix}/lib/%{name}/container
 %{_prefix}/lib/%{name}/container/*
+%{_prefix}/lib/%{name}/generate-xdg-data-dirs.sh
 %{_prefix}/lib/sysusers.d/*.conf
+%{_prefix}/lib/tmpfiles.d/*.conf
 %{_prefix}/lib/systemd/system/*.service
 %{_prefix}/lib/systemd/system-preset/*.preset
 %{_prefix}/lib/systemd/user/*
-%dir %{_prefix}/lib/systemd/system-environment-generators
-%dir %{_prefix}/lib/systemd/user-environment-generators
 %{_prefix}/lib/systemd/system-environment-generators/*
-%{_prefix}/lib/systemd/user-environment-generators/*
-%dir /usr/libexec
-%dir /usr/libexec/linglong
-/usr/libexec/%{name}/00-id-mapping
-/usr/libexec/%{name}/05-initialize
-/usr/libexec/%{name}/20-devices
-/usr/libexec/%{name}/30-user-home
-/usr/libexec/%{name}/40-host-ipc
-/usr/libexec/%{name}/90-legacy
-/usr/libexec/%{name}/create-linglong-dirs
-/usr/libexec/%{name}/upgrade-all
-%dir %{_datadir}/%{name}
-%dir %{_datadir}/%{name}/api
+/usr/libexec/%{name}/ll-package-manager
+/usr/libexec/%{name}/00-id-mapping-static
+/usr/libexec/%{name}/05-initialize-static
+/usr/libexec/%{name}/20-devices-static
+/usr/libexec/%{name}/25-host-env-static
+/usr/libexec/%{name}/30-user-home-static
+/usr/libexec/%{name}/40-host-ipc-static
+/usr/libexec/%{name}/90-legacy-static
+/usr/libexec/%{name}/ll-session-helper
 %{_datadir}/bash-completion/completions/ll-cli
 %{_datadir}/dbus-1/system-services/*.service
 %{_datadir}/dbus-1/system.d/*.conf
+%{_datadir}/polkit-1/actions/org.deepin.linglong.PackageManager1.policy
 %{_datadir}/%{name}/config.yaml
 %{_datadir}/mime/packages/*
-%{_datadir}/%{name}/api/api.json
-%{_datadir}/applications/*.desktop
+%{_datadir}/locale/*
 
 %files -n linglong-builder
 %license LICENSE
-%{_bindir}/ll-builder
+%dir /usr/libexec
 %dir /usr/libexec/%{name}
-/usr/libexec/%{name}/fetch-dsc-repo
-/usr/libexec/%{name}/fetch-git-repo
-/usr/libexec/%{name}/app-conf-generator
 %dir /usr/libexec/%{name}/builder
 %dir /usr/libexec/%{name}/builder/helper
+%dir /usr/share/%{name}
+%dir /usr/share/%{name}/builder
+%dir /usr/share/%{name}/builder/templates
+%{_bindir}/ll-builder
+/usr/libexec/%{name}/fetch-dsc-source
+/usr/libexec/%{name}/fetch-git-source
+/usr/libexec/%{name}/fetch-file-source
+/usr/libexec/%{name}/fetch-archive-source
+/usr/libexec/%{name}/app-conf-generator
 /usr/libexec/%{name}/builder/helper/*.sh
-%dir %{_datadir}/%{name}/builder
-%dir %{_datadir}/%{name}/builder/templates
 %{_datadir}/bash-completion/completions/ll-builder
 %{_datadir}/%{name}/builder/templates/*.yaml
 

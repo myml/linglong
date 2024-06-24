@@ -19,9 +19,10 @@
 /debian/linglong-bin/
 /debian/linglong-box.substvars
 /debian/linglong-box/
-/debian/linglong-builder
 /debian/linglong-builder.substvars
 /debian/linglong-builder/
+/debian/linglong-static.substvars
+/debian/linglong-static/
 /debian/tmp/
 /debian/tmp/usr
 /obj-x86_64-linux-gnu

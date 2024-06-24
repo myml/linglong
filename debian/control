@@ -39,6 +39,7 @@ Architecture: any
 Depends: desktop-file-utils,
          erofsfuse,
          libglib2.0-bin,
+         linglong-static,
          linglong-box | crun,
          ostree,
          shared-mime-info,
@@ -69,3 +70,7 @@ Depends: ${misc:Depends},
          ${shlibs:Depends}
 Description: Deepin sandbox with OCI standard.
  Deepin sandbox...
+
+Package: linglong-static
+Architecture: any
+Description: Linglong static binrarys and tools

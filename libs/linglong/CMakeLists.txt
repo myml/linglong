@@ -80,7 +80,7 @@ pfl_add_library(
   Qt5::DBus
   Qt5::Network
   Qt5::WebSockets
-  QtLinglongRepoClientAPI
+  LinglongRepoClientAPI
   docopt
   ytj::ytj
   tl::expected

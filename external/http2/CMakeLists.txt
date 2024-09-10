@@ -54,18 +54,24 @@ set(SRCS
     src/binary.c
     external/cJSON.c
     model/object.c
-{{#models}}
-{{#model}}
-    model/{{classFilename}}.c
-{{/model}}
-{{/models}}
-{{#apiInfo}}
-{{#apis}}
-{{#operations}}
-    api/{{classFilename}}.c
-{{/operations}}
-{{/apis}}
-{{/apiInfo}}
+    model/api_json_result.c
+    model/api_upload_task_file_resp.c
+    model/api_upload_task_layer_file_resp.c
+    model/fuzzy_search_app_200_response.c
+    model/get_repo_200_response.c
+    model/new_upload_task_id_200_response.c
+    model/request_auth.c
+    model/request_fuzzy_search_req.c
+    model/request_register_struct.c
+    model/response_new_upload_task_resp.c
+    model/response_sign_in.c
+    model/response_upload_task_resp.c
+    model/response_upload_task_status_info.c
+    model/schema_new_upload_task_req.c
+    model/schema_repo_info.c
+    model/sign_in_200_response.c
+    model/upload_task_info_200_response.c
+    api/ClientAPI.c
 
 )
 
@@ -76,18 +82,24 @@ set(HDRS
     include/keyValuePair.h
     external/cJSON.h
     model/object.h
-{{#models}}
-{{#model}}
-    model/{{classFilename}}.h
-{{/model}}
-{{/models}}
-{{#apiInfo}}
-{{#apis}}
-{{#operations}}
-    api/{{classFilename}}.h
-{{/operations}}
-{{/apis}}
-{{/apiInfo}}
+    model/api_json_result.h
+    model/api_upload_task_file_resp.h
+    model/api_upload_task_layer_file_resp.h
+    model/fuzzy_search_app_200_response.h
+    model/get_repo_200_response.h
+    model/new_upload_task_id_200_response.h
+    model/request_auth.h
+    model/request_fuzzy_search_req.h
+    model/request_register_struct.h
+    model/response_new_upload_task_resp.h
+    model/response_sign_in.h
+    model/response_upload_task_resp.h
+    model/response_upload_task_status_info.h
+    model/schema_new_upload_task_req.h
+    model/schema_repo_info.h
+    model/sign_in_200_response.h
+    model/upload_task_info_200_response.h
+    api/ClientAPI.h
 
 )
 
@@ -169,13 +181,7 @@ set(HDRS "")
 ## This section shows how to use the above compiled library to compile the source files
 ## set source files
 #set(SRCS
-{{#apiInfo}}
-{{#apis}}
-{{#operations}}
-#    unit-tests/manual-{{classname}}.c
-{{/operations}}
-{{/apis}}
-{{/apiInfo}}
+#    unit-tests/manual-ClientAPI.c
 #)
 
 ##set header files

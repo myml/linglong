@@ -8,7 +8,7 @@ size_t writeDataCallback(void *buffer, size_t size, size_t nmemb, void *userp);
 
 apiClient_t *apiClient_create() {
     apiClient_t *apiClient = malloc(sizeof(apiClient_t));
-    apiClient->basePath = strdup("{{{basePath}}}");
+    apiClient->basePath = strdup("http://localhost");
     apiClient->sslConfig = NULL;
     apiClient->dataReceived = NULL;
     apiClient->dataReceivedLen = 0;
@@ -16,39 +16,20 @@ apiClient_t *apiClient_create() {
     apiClient->progress_func = NULL;
     apiClient->progress_data = NULL;
     apiClient->response_code = 0;
-    {{#hasAuthMethods}}
-    {{#authMethods}}
-    {{#isBasicBasic}}
-    apiClient->username = NULL;
-    apiClient->password = NULL;
-    {{/isBasicBasic}}
-    {{#isOAuth}}
-    apiClient->accessToken = NULL;
-    {{/isOAuth}}
-    {{#isApiKey}}
-    apiClient->apiKeys_{{name}} = NULL;
-    {{/isApiKey}}
-    {{/authMethods}}
-    {{/hasAuthMethods}}
+    apiClient->apiKeys_Token = NULL;
 
     return apiClient;
 }
 
 apiClient_t *apiClient_create_with_base_path(const char *basePath
 , sslConfig_t *sslConfig
-{{#hasAuthMethods}}
-{{#authMethods}}
-{{#isApiKey}}
-, list_t *apiKeys_{{name}}
-{{/isApiKey}}
-{{/authMethods}}
-{{/hasAuthMethods}}
+, list_t *apiKeys_Token
 ) {
     apiClient_t *apiClient = malloc(sizeof(apiClient_t));
     if(basePath){
         apiClient->basePath = strdup(basePath);
     }else{
-        apiClient->basePath = strdup("{{{basePath}}}");
+        apiClient->basePath = strdup("http://localhost");
     }
 
     if(sslConfig){
@@ -63,30 +44,17 @@ apiClient_t *apiClient_create_with_base_path(const char *basePath
     apiClient->progress_func = NULL;
     apiClient->progress_data = NULL;
     apiClient->response_code = 0;
-    {{#hasAuthMethods}}
-    {{#authMethods}}
-    {{#isBasicBasic}}
-    apiClient->username = NULL;
-    apiClient->password = NULL;
-    {{/isBasicBasic}}
-    {{#isOAuth}}
-    apiClient->accessToken = NULL;
-    {{/isOAuth}}
-    {{#isApiKey}}
-    if(apiKeys_{{name}}!= NULL) {
-        apiClient->apiKeys_{{name}} = list_createList();
+    if(apiKeys_Token!= NULL) {
+        apiClient->apiKeys_Token = list_createList();
         listEntry_t *listEntry = NULL;
-        list_ForEach(listEntry, apiKeys_{{name}}) {
+        list_ForEach(listEntry, apiKeys_Token) {
             keyValuePair_t *pair = listEntry->data;
             keyValuePair_t *pairDup = keyValuePair_create(strdup(pair->key), strdup(pair->value));
-            list_addElement(apiClient->apiKeys_{{name}}, pairDup);
+            list_addElement(apiClient->apiKeys_Token, pairDup);
         }
     }else{
-        apiClient->apiKeys_{{name}} = NULL;
+        apiClient->apiKeys_Token = NULL;
     }
-    {{/isApiKey}}
-    {{/authMethods}}
-    {{/hasAuthMethods}}
 
     return apiClient;
 }
@@ -98,25 +66,9 @@ void apiClient_free(apiClient_t *apiClient) {
     apiClient->data_callback_func = NULL;
     apiClient->progress_func = NULL;
     apiClient->progress_data = NULL;
-    {{#hasAuthMethods}}
-    {{#authMethods}}
-    {{#isBasicBasic}}
-    if(apiClient->username) {
-        free(apiClient->username);
-    }
-    if(apiClient->password) {
-        free(apiClient->password);
-    }
-    {{/isBasicBasic}}
-    {{#isOAuth}}
-    if(apiClient->accessToken) {
-        free(apiClient->accessToken);
-    }
-    {{/isOAuth}}
-    {{#isApiKey}}
-    if(apiClient->apiKeys_{{name}}) {
+    if(apiClient->apiKeys_Token) {
         listEntry_t *listEntry = NULL;
-        list_ForEach(listEntry, apiClient->apiKeys_{{name}}) {
+        list_ForEach(listEntry, apiClient->apiKeys_Token) {
             keyValuePair_t *pair = listEntry->data;
             if(pair->key){
                 free(pair->key);
@@ -126,11 +78,8 @@ void apiClient_free(apiClient_t *apiClient) {
             }
             keyValuePair_free(pair);
         }
-        list_freeList(apiClient->apiKeys_{{name}});
+        list_freeList(apiClient->apiKeys_Token);
     }
-    {{/isApiKey}}
-    {{/authMethods}}
-    {{/hasAuthMethods}}
     free(apiClient);
 }
 
@@ -453,13 +402,10 @@ void apiClient_invoke(apiClient_t    *apiClient,
             curl_easy_setopt(handle, CURLOPT_NOPROGRESS, 0L);
         }
 
-        {{#hasAuthMethods}}
-        {{#authMethods}}
-        {{#isApiKey}}
         // this would only be generated for apiKey authentication
-        if (apiClient->apiKeys_{{name}} != NULL)
+        if (apiClient->apiKeys_Token != NULL)
         {
-        list_ForEach(listEntry, apiClient->apiKeys_{{name}}) {
+        list_ForEach(listEntry, apiClient->apiKeys_Token) {
         keyValuePair_t *apiKey = listEntry->data;
         if((apiKey->key != NULL) &&
            (apiKey->value != NULL) )
@@ -471,9 +417,6 @@ void apiClient_invoke(apiClient_t    *apiClient,
         }
         }
         }
-        {{/isApiKey}}
-        {{/authMethods}}
-        {{/hasAuthMethods}}
 
         char *targetUrl =
             assembleTargetUrl(apiClient->basePath,
@@ -490,44 +433,6 @@ void apiClient_invoke(apiClient_t    *apiClient,
         curl_easy_setopt(handle, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(handle, CURLOPT_VERBOSE, 0); // to get curl debug msg 0: to disable, 1L:to enable
 
-        {{#hasAuthMethods}}
-        {{#authMethods}}
-        {{#isBasicBasic}}
-        // this would only be generated for basic authentication:
-        char *authenticationToken;
-
-        if((apiClient->username != NULL) &&
-           (apiClient->password != NULL) )
-        {
-            authenticationToken = malloc(strlen(
-                                 apiClient->username) +
-                                         strlen(
-                                 apiClient->password) +
-                                         2);
-            sprintf(authenticationToken,
-                    "%s:%s",
-                    apiClient->username,
-                    apiClient->password);
-
-            curl_easy_setopt(handle,
-                             CURLOPT_HTTPAUTH,
-                             CURLAUTH_BASIC);
-            curl_easy_setopt(handle,
-                             CURLOPT_USERPWD,
-                             authenticationToken);
-        }
-        {{/isBasicBasic}}
-        {{#isOAuth}}
-        // this would only be generated for OAuth2 authentication
-        if(apiClient->accessToken != NULL) {
-            // curl_easy_setopt(handle, CURLOPT_HTTPAUTH, CURLAUTH_BEARER);
-            curl_easy_setopt(handle,
-                             CURLOPT_XOAUTH2_BEARER,
-                             apiClient->accessToken);
-        }
-        {{/isOAuth}}
-        {{/authMethods}}
-        {{/hasAuthMethods}}
 
         if(bodyParameters != NULL) {
             postData(handle, bodyParameters);
@@ -551,17 +456,6 @@ void apiClient_invoke(apiClient_t    *apiClient,
             fprintf(stderr, "curl_easy_perform() failed\n\nURL: %s\nIP: %s\nPORT: %li\nSCHEME: %s\nStrERROR: %s\n",url,ip,port,scheme,
             curl_easy_strerror(res));
         }
-        {{#hasAuthMethods}}
-        {{#authMethods}}
-        {{#isBasicBasic}}
-        if((apiClient->username != NULL) &&
-        (apiClient->password != NULL) )
-        {
-        free(authenticationToken);
-        }
-        {{/isBasicBasic}}
-        {{/authMethods}}
-        {{/hasAuthMethods}}
 
         curl_easy_cleanup(handle);
         if(formParameters != NULL) {

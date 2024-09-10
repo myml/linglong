@@ -12,8 +12,7 @@ GIT=${GIT:="git"}
 repoRoot="$("$GIT" rev-parse --show-toplevel)"
 cd "$repoRoot/tools"
 
-output=../external/http
-cppNamespace=linglong::api::client
+output=../external/http2
 # 单个接口可能存在有多个tag，openapi-generator-cli会为每个tag生成client文件，
 # 这些client之间有重复并且在客户端不会被用到，所以这里只保留第一个tag
 onlyFirstTag=KEEP_ONLY_FIRST_TAG_IN_OPERATION=true
@@ -31,10 +30,8 @@ openapi-generator-cli() {
         fi
 }
 
-openapi-generator-cli generate -g cpp-qt-client -o "$output" \
+openapi-generator-cli generate -g c -o "$output" \
         -i ../api/http/client_swagger.json \
         $skipValidate \
         --openapi-normalizer $onlyFirstTag \
-        --additional-properties="modelNamePrefix=,optionalProjectFile=false,cppNamespace=$cppNamespace" \
-        --package-name=QtLinglongRepoClientAPI \
-        --template-dir "$repoRoot/tools/openapi-cpp-qt-client"
+        --template-dir "$repoRoot/tools/openapi-c-libcurl-client"

@@ -35,7 +35,10 @@
 #include <QUrl>
 
 #include <filesystem>
+#include <fstream>
+#include <iostream>
 #include <optional>
+#include <regex>
 #include <string>
 #include <vector>
 
@@ -182,6 +185,99 @@ utils::error::Result<void> splitDevelop(QString installFilepath,
                                         const std::function<void(int)> &handleProgress)
 {
     LINGLONG_TRACE("split layers file");
+
+    {
+        auto prefixPath = prefix.toStdString();
+        auto installFile = installFilepath.toStdString();
+        auto src = developOutput.absolutePath().toStdString();
+        auto dest = binaryOutput.absolutePath().toStdString();
+        std::list<std::string> allPaths;
+        std::list<std::string> pendingInstallPaths;
+        // get all paths in the source directory
+        for (auto &info : std::filesystem::recursive_directory_iterator(src)) {
+            auto path = info.path().string();
+            path.replace(0, src.length(), prefixPath);
+            allPaths.push_back(path);
+        }
+        if (!std::filesystem::exists(installFile)) {
+            pendingInstallPaths = allPaths;
+        } else {
+            std::ifstream f(installFile);
+            if (!f) {
+                return LINGLONG_ERR(QString("failed to open ") + installFile.c_str());
+            }
+            std::string line;
+            // read all lines from the .install file
+            while (std::getline(f, line)) {
+                // 跳过注释
+                if (line.find("#") == 0) {
+                    continue;
+                }
+                // 以!开头的为正则排除规则
+                if (line.find("!^") == 0) {
+                    std::regex re(line.substr(1));
+                    pendingInstallPaths.remove_if([&re](const std::string &path) {
+                        return std::regex_match(path, re);
+                    });
+                }
+                // 以!开头的为路径排除规则
+                else if (line.find("!") == 0) {
+                    auto exclude = line.substr(1);
+                    pendingInstallPaths.remove_if([&exclude](const std::string &path) {
+                        return exclude == path;
+                    });
+                }
+                // 以^开头的为正则匹配
+                else if (line.find("^") == 0) {
+                    std::regex re(line);
+                    for (auto &path : allPaths) {
+                        if (std::regex_match(path, re)) {
+                            pendingInstallPaths.push_back(path);
+                        }
+                    }
+                }
+                // 其余情况为路径匹配
+                else {
+                    pendingInstallPaths.push_back(line);
+                }
+            }
+        }
+        // copy files to binary files directory
+        for (auto &path : pendingInstallPaths) {
+            auto srcFile = path;
+            auto destFile = path;
+            srcFile.replace(0, prefixPath.length(), src);
+            destFile.replace(0, prefixPath.length(), dest);
+            std::cout << "copy " << srcFile << " to " << destFile << std::endl;
+            auto status = std::filesystem::status(src);
+            if (std::filesystem::is_symlink(status)) {
+                std::filesystem::copy_symlink(srcFile, destFile);
+            } else if (std::filesystem::is_regular_file(status)) {
+                std::filesystem::copy_file(srcFile, destFile);
+            } else if (std::filesystem::is_directory(status)) {
+                std::filesystem::create_directories(destFile);
+            } else {
+                return LINGLONG_ERR(QString("unknown file type %1").arg(srcFile.c_str()));
+            }
+            // std::filesystem::copy(srcFile, destFile);
+        }
+        auto filename = std::filesystem::path(installFile).filename().string();
+        {
+            std::ofstream f(src + "/../" + filename);
+            qDebug() << src.c_str() << filename.c_str();
+            for (auto &line : allPaths) {
+                f << line << std::endl;
+            }
+        }
+        {
+            std::ofstream f(dest + "/../" + filename);
+            for (auto &line : pendingInstallPaths) {
+                f << line << std::endl;
+            }
+        }
+        return LINGLONG_OK;
+    }
+
     const QString src = developOutput.absolutePath();
     const QString dest = binaryOutput.absolutePath();
     // get install file rule

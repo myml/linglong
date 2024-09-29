@@ -287,12 +287,14 @@ int main(int argc, char **argv)
                 QCommandLineOption("skip-fetch-source", "skip fetch sources", "");
               auto buildSkipPullDepend =
                 QCommandLineOption("skip-pull-depend", "skip pull dependency", "");
-              auto buildSkipRunContainer =
-                QCommandLineOption("skip-run-container",
-                                   "skip run container. This implies skip-commit-output",
-                                   "");
+              auto buildSkipRunContainer = QCommandLineOption(
+                "skip-run-container",
+                "skip run container. This implies skip-commit-output and skip-check-output",
+                "");
               auto buildSkipCommitOutput =
                 QCommandLineOption("skip-commit-output", "skip commit build output", "");
+              auto buildSkipCheckOutput =
+                QCommandLineOption("skip-check-output", "skip commit build output", "");
               auto buildArch = QCommandLineOption("arch", "set the build arch", "arch");
 
               parser.addOptions({ yamlFile,
@@ -302,6 +304,7 @@ int main(int argc, char **argv)
                                   buildSkipPullDepend,
                                   buildSkipRunContainer,
                                   buildSkipCommitOutput,
+                                  buildSkipCheckOutput,
                                   buildArch });
 
               parser.addPositionalArgument("build", "build project", "build");
@@ -353,6 +356,11 @@ int main(int argc, char **argv)
               if (parser.isSet(buildSkipCommitOutput)) {
                   auto cfg = builder.getConfig();
                   cfg.skipCommitOutput = true;
+                  builder.setConfig(cfg);
+              }
+              if (parser.isSet(buildSkipCheckOutput)) {
+                  auto cfg = builder.getConfig();
+                  cfg.skipCheckOutput = true;
                   builder.setConfig(cfg);
               }
               if (parser.isSet(buildOffline)) {

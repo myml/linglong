@@ -15,6 +15,7 @@
 #include <QCryptographicHash>
 #include <QStandardPaths>
 
+#include <string>
 #include <unordered_set>
 #include <utility>
 
@@ -157,6 +158,12 @@ utils::error::Result<void> UABPackager::setIcon(const QFileInfo &newIcon) noexce
 
     icon = newIcon;
     return LINGLONG_OK;
+}
+
+// set app install dir, default is /opt/apps/$appid/files
+void UABPackager::setAppHome(const std::string &appHome) noexcept
+{
+    m_appHome = appHome;
 }
 
 utils::error::Result<void> UABPackager::appendLayer(const LayerDir &layer) noexcept
@@ -511,8 +518,13 @@ utils::error::Result<void> UABPackager::prepareBundle(const QDir &bundleDir) noe
     QTextStream stream{ &ldConf };
     stream << "/runtime/lib" << Qt::endl;
     stream << "/runtime/lib/" + arch->getTriplet() << Qt::endl;
-    stream << "/opt/apps/" + appID + "/files/lib" << Qt::endl;
-    stream << "/opt/apps/" + appID + "/files/lib/" + arch->getTriplet() << Qt::endl;
+    auto appHome = "/opt/apps/" + appID + "/files";
+    if (m_appHome) {
+        appHome = QString::fromStdString(*m_appHome);
+    }
+    stream << appHome + "/lib" << Qt::endl;
+    stream << appHome + "/lib/" + arch->getTriplet() << Qt::endl;
+
     stream.flush();
 
     // copy ll-box

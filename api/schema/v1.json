@@ -552,6 +552,10 @@
         "description": {
           "type": "string",
           "description": "description of package info"
+        },
+        "app_home": {
+          "type": "string",
+          "description": "app_home of package info"
         }
       }
     },
@@ -626,7 +630,7 @@
         },
         "description": {
           "type": "string",
-          "description": "description of package info"
+          "description": "application install location. The field is intended solely for the use of the base, indicating the installation path of applications built using that base."
         }
       }
     },

@@ -22,9 +22,10 @@ struct ContainerOptions
     QString appID;
     QString containerID;
 
-    std::optional<QDir> runtimeDir; // mount to /runtime
-    QDir baseDir;                   // mount to /
-    std::optional<QDir> appDir;     // mount to /opt/apps/${info.appid}/files
+    std::optional<QDir> runtimeDir;     // mount to /runtime
+    QDir baseDir;                       // mount to /
+    std::optional<QDir> appDir;         // mount to /opt/apps/${info.appid}/files
+    std::optional<std::string> appHome; // if appHome exists, mount appDir to appHome
 
     std::vector<api::types::v1::OciConfigurationPatch> patches;
     std::vector<ocppi::runtime::config::types::Mount> mounts; // extra mounts

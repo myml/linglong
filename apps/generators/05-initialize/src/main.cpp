@@ -58,9 +58,8 @@ int main()
         });
 
         mounts.push_back(
-          { { "destination",
-              std::filesystem::path("/opt/apps") / annotations["org.deepin.linglong.appID"]
-                / "files" },
+          { { "destination", annotations["org.deepin.linglong.appHome"] },
+            // TODO 是否应该使用ro权限？
             { "options", nlohmann::json::array({ "rbind", "rw" }) },
             { "source",
               std::filesystem::path(annotations["org.deepin.linglong.appDir"].get<std::string>())

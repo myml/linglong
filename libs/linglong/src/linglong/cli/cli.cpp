@@ -271,6 +271,7 @@ int Cli::run(std::map<std::string, docopt::value> &args)
         this->printer.printErr(LINGLONG_ERRV(baseLayerDir));
         return -1;
     }
+    auto baseInfo = baseLayerDir->info();
 
     auto command = args["COMMAND"].asStringList();
     if (command.empty()) {
@@ -373,6 +374,7 @@ int Cli::run(std::map<std::string, docopt::value> &args)
       .runtimeDir = runtimeLayerDir,
       .baseDir = *baseLayerDir,
       .appDir = *appLayerDir,
+      .appHome = baseInfo->appHome,
       .patches = {},
       .mounts = std::move(applicationMounts),
       .masks = {},

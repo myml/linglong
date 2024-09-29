@@ -54,7 +54,8 @@ std::string channel;
 */
 std::optional<std::vector<std::string>> command;
 /**
-* description of package info
+* application install location. The field is intended solely for the use of the base,
+* indicating the installation path of applications built using that base.
 */
 std::optional<std::string> description;
 /**

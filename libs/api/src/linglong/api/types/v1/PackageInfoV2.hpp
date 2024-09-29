@@ -34,6 +34,10 @@ using nlohmann::json;
 */
 struct PackageInfoV2 {
 /**
+* app_home of package info
+*/
+std::optional<std::string> appHome;
+/**
 * arch of package info
 */
 std::vector<std::string> arch;

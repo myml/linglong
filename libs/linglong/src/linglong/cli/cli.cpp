@@ -278,7 +278,7 @@ void Cli::onTaskPropertiesChanged(QString interface,                            
                 continue;
             }
 
-            lastPercentage = val;
+            lastPercentage = val > 100 ? 100 : val;
             continue;
         }
 
@@ -2666,6 +2666,34 @@ int Cli::inspect([[maybe_unused]] CLI::App *subcommand)
     }
 
     this->printer.printInspect(result);
+    return 0;
+}
+
+int Cli::dir([[maybe_unused]] CLI::App *subcommand)
+{
+    LINGLONG_TRACE("command dir");
+
+    auto fuzzyRef = package::FuzzyReference::parse(QString::fromStdString(options.appid));
+    if (!fuzzyRef) {
+        this->printer.printErr(fuzzyRef.error());
+        return -1;
+    }
+
+    auto ref = this->repository.clearReference(*fuzzyRef,
+                                               { .forceRemote = false, .fallbackToRemote = false });
+    if (!ref) {
+        qDebug() << ref.error();
+        this->printer.printErr(LINGLONG_ERRV("Can not find such application."));
+        return -1;
+    }
+
+    auto layerItem = this->repository.getLayerItem(*ref);
+    if (!layerItem) {
+        this->printer.printErr(layerItem.error());
+        return -1;
+    }
+
+    std::cout << layerItem->commit << std::endl;
     return 0;
 }
 

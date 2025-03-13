@@ -1,3 +1,4 @@
+%global debug_package %{nil}
 Name:           linglong
 Version:        1.4.3
 Release:        1

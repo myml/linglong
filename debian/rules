@@ -12,11 +12,6 @@ ENABLE_UAB_SUPPORT=TRUE
 ENABLE_STATIC_BOX=TRUE
 endif
 
-ifeq ($(OS), uos)
-ENABLE_UAB_SUPPORT=TRUE
-ENABLE_STATIC_BOX=TRUE
-endif
-
 %:
 	dh $@ --buildsystem=cmake
 

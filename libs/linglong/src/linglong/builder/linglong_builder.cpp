@@ -85,14 +85,11 @@ utils::error::Result<void> inline copyDir(const QString &src, const QString &dst
         };
     }
 
-    QFileInfoList list = srcDir.entryInfoList();
+    QFileInfoList list =
+      srcDir.entryInfoList(QDir::System | QDir::AllEntries | QDir::NoDotAndDotDot);
 
     for (const auto &info : list) {
-        if (info.fileName() == "." || info.fileName() == "..") {
-            continue;
-        }
-
-        if (info.isDir()) {
+        if (info.isDir() && !info.isSymLink()) {
             // 穿件文件夹，递归调用
             auto ret = copyDir(info.filePath(), dst + "/" + info.fileName());
             if (!ret.has_value()) {
@@ -280,6 +277,20 @@ utils::error::Result<void> installModule(QStringList installRules,
     auto installFile = [&](const QFileInfo &info,
                            const QString &dstPath) -> utils::error::Result<void> {
         LINGLONG_TRACE("install file");
+        std::error_code ec;
+        if (info.isSymLink()) {
+            auto target = std::filesystem::read_symlink(info.filePath().toStdString());
+            std::filesystem::create_symlink(target, dstPath.toStdString(), ec);
+
+            if (ec) {
+                return LINGLONG_ERR(QString("Failed to create symlink: %1 -> %2: %3")
+                                      .arg(info.filePath())
+                                      .arg(target.c_str())
+                                      .arg(ec.message().c_str()));
+            }
+            return LINGLONG_OK;
+        }
+
         if (info.isDir()) {
             QDir().mkpath(dstPath);
             return LINGLONG_OK;
@@ -305,7 +316,7 @@ utils::error::Result<void> installModule(QStringList installRules,
         // 如果不以^符号开头，当作普通路径使用
         if (!rule.startsWith("^")) {
             // append $PROJECT_ROOT/output/_build/files to prefix
-            rule = src + "/" + rule;
+            rule = QDir::cleanPath(src + "/" + rule);
             QFileInfo info(rule);
             // 链接指向的文件如果不存在，info.exists会返回false
             // 所以要先判断文件是否是链接
@@ -1115,17 +1126,19 @@ include /opt/apps/@id@/files/etc/ld.so.conf)";
     if (this->project.package.kind != "runtime") {
         // 仅导出名单中的目录，以避免意外文件影响系统功能
         const QStringList exportPaths = {
-            "share/applications", // Copy desktop files
-            "share/mime",         // Copy MIME Type files
-            "share/icons",        // Icons
-            "share/dbus-1",       // D-Bus service files
-            "share/gnome-shell",  // Search providers
-            "share/appdata",      // Copy appdata/metainfo files (legacy path)
-            "share/metainfo",     // Copy appdata/metainfo files
-            "share/plugins",      // Copy plugins conf，The configuration files provided by some
-                                  // applications maybe used by the host dde-file-manager.
-            "share/systemd",      // copy systemd service files
-            "share/deepin-manual" // copy deepin-manual files
+            "share/applications",  // Copy desktop files
+            "share/mime",          // Copy MIME Type files
+            "share/icons",         // Icons
+            "share/dbus-1",        // D-Bus service files
+            "share/gnome-shell",   // Search providers
+            "share/appdata",       // Copy appdata/metainfo files (legacy path)
+            "share/metainfo",      // Copy appdata/metainfo files
+            "share/plugins",       // Copy plugins conf，The configuration files provided by some
+                                   // applications maybe used by the host dde-file-manager.
+            "share/systemd",       // copy systemd service files
+            "share/deepin-manual", // copy deepin-manual files
+            "share/dsg" // Copy dsg conf，the configuration file is used for self-developed
+                        // applications.
         };
 
         QDir binaryFiles = this->workingDir.absoluteFilePath("linglong/output/binary/files");
@@ -1310,7 +1323,8 @@ include /opt/apps/@id@/files/etc/ld.so.conf)";
     return LINGLONG_OK;
 }
 
-utils::error::Result<void> Builder::exportUAB(const QString &destination, const UABOption &option)
+utils::error::Result<void> Builder::exportUAB(const QString &destination,
+                                              const ExportOption &option)
 {
     LINGLONG_TRACE("export uab file");
 
@@ -1321,8 +1335,8 @@ utils::error::Result<void> Builder::exportUAB(const QString &destination, const 
 
     package::UABPackager packager{ destDir };
 
-    if (!option.iconPath.isEmpty()) {
-        if (auto ret = packager.setIcon(QFileInfo{ option.iconPath }); !ret) {
+    if (!option.iconPath.empty()) {
+        if (auto ret = packager.setIcon(QFileInfo{ option.iconPath.c_str() }); !ret) {
             return LINGLONG_ERR(ret);
         }
     }
@@ -1366,6 +1380,9 @@ utils::error::Result<void> Builder::exportUAB(const QString &destination, const 
     }
     packager.appendLayer(*baseDir);
 
+    if (!option.compressor.empty()) {
+        packager.setCompressor(option.compressor.c_str());
+    }
     if (this->project.runtime) {
         auto runtimeFuzzyRef =
           package::FuzzyReference::parse(QString::fromStdString(this->project.runtime.value()));
@@ -1398,8 +1415,8 @@ utils::error::Result<void> Builder::exportUAB(const QString &destination, const 
     }
     packager.appendLayer(*appDir); // app layer must be the last of appended layer
 
-    if (!option.loader.isEmpty()) {
-        packager.setLoader(option.loader);
+    if (!option.loader.empty()) {
+        packager.setLoader(option.loader.c_str());
     }
 
     auto uabFile = QString{ "%1_%2_%3_%4.uab" }.arg(curRef->id,
@@ -1413,7 +1430,8 @@ utils::error::Result<void> Builder::exportUAB(const QString &destination, const 
     return LINGLONG_OK;
 }
 
-utils::error::Result<void> Builder::exportLayer(const QString &destination)
+utils::error::Result<void> Builder::exportLayer(const QString &destination,
+                                                const QString &compressor)
 {
     LINGLONG_TRACE("export layer file");
 
@@ -1432,6 +1450,9 @@ utils::error::Result<void> Builder::exportLayer(const QString &destination)
     auto modules = this->repo.getModuleList(*ref);
 
     package::LayerPackager pkger;
+    if (!compressor.isEmpty()) {
+        pkger.setCompressor(compressor);
+    }
     for (const auto &module : modules) {
         auto layerDir = this->repo.getLayerDir(*ref, module);
         if (!layerDir) {

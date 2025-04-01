@@ -277,8 +277,13 @@ utils::error::Result<void> installModule(QStringList installRules,
     auto installFile = [&](const QFileInfo &info,
                            const QString &dstPath) -> utils::error::Result<void> {
         LINGLONG_TRACE("install file");
-        std::error_code ec;
-        if (info.isSymLink()) {
+
+        if (info.isDir()) {
+            if (!info.isSymLink()) {
+                QDir().mkpath(dstPath);
+                return LINGLONG_OK;
+            }
+            std::error_code ec;
             auto target = std::filesystem::read_symlink(info.filePath().toStdString());
             std::filesystem::create_symlink(target, dstPath.toStdString(), ec);
 
@@ -288,11 +293,6 @@ utils::error::Result<void> installModule(QStringList installRules,
                                       .arg(target.c_str())
                                       .arg(ec.message().c_str()));
             }
-            return LINGLONG_OK;
-        }
-
-        if (info.isDir()) {
-            QDir().mkpath(dstPath);
             return LINGLONG_OK;
         } else {
             QDir(dstPath.left(dstPath.lastIndexOf('/'))).mkpath(".");
@@ -1123,6 +1123,8 @@ include /opt/apps/@id@/files/etc/ld.so.conf)";
     printMessage("");
 
     qDebug() << "generate entries";
+    // TODO: The current whitelist logic is not very flexible.
+    // The application configuration file can be exported after configuring it in the build configuration file(linglong.yaml).
     if (this->project.package.kind != "runtime") {
         // 仅导出名单中的目录，以避免意外文件影响系统功能
         const QStringList exportPaths = {
@@ -1135,10 +1137,11 @@ include /opt/apps/@id@/files/etc/ld.so.conf)";
             "share/metainfo",      // Copy appdata/metainfo files
             "share/plugins",       // Copy plugins conf，The configuration files provided by some
                                    // applications maybe used by the host dde-file-manager.
-            "share/systemd",       // copy systemd service files
             "share/deepin-manual", // copy deepin-manual files
-            "share/dsg" // Copy dsg conf，the configuration file is used for self-developed
-                        // applications.
+            "share/dsg", // Copy dsg conf，the configuration file is used for self-developed
+                         // applications.
+            "share/templates" // Copy templates file for some applications such as wps
+
         };
 
         QDir binaryFiles = this->workingDir.absoluteFilePath("linglong/output/binary/files");
@@ -1179,11 +1182,15 @@ include /opt/apps/@id@/files/etc/ld.so.conf)";
         if (binaryFiles.exists("lib/systemd/user")) {
             // 配置放到share/systemd/user或lib/systemd/user对systemd来说基本等价
             // 但玲珑仅将share导出到XDG_DATA_DIR，所以要将lib/systemd/user的内容复制到share/systemd/user
-            if (!binaryEntries.mkpath("share/systemd/user")) {
-                qWarning() << "mkpath files/share/systemd/user: failed";
+            // 2025-03-24 修订
+            // XDG_DATA_DIR的优先级高于/usr/lib/systemd，如果应用意外导出了系统服务文件，例如dbus.service，会导致系统功能异常
+            // 现在安装应用时会通过generator脚本将lib/systemd/user下的文件复制到优先级最低的generator.late目录
+            // 因此构建时将files/lib/systemd/user的内容复制到entries/lib/systemd/user
+            if (!binaryEntries.mkpath("lib/systemd/user")) {
+                qWarning() << "mkpath files/lib/systemd/user: failed";
             }
             auto ret = copyDir(binaryFiles.filePath("lib/systemd/user"),
-                               binaryEntries.absoluteFilePath("share/systemd/user"));
+                               binaryEntries.absoluteFilePath("lib/systemd/user"));
             if (!ret.has_value()) {
                 return LINGLONG_ERR(ret);
             }
@@ -2095,14 +2102,19 @@ void Builder::mergeOutput(const QList<QDir> &src, const QDir &dest, const QStrin
                           QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
                           QDirIterator::Subdirectories);
         while (iter.hasNext()) {
+            QString path = iter.next();
+
+            if (iter.fileName().startsWith(".wh."))
+                continue;
+
             struct stat st;
-            if (-1 == lstat(iter.next().toStdString().c_str(), &st))
+            if (-1 == lstat(path.toStdString().c_str(), &st))
                 continue;
 
             if (st.st_size == 0 && st.st_rdev == 0 && st.st_mode == S_IFCHR)
                 continue;
 
-            QString relativePath = dir.relativeFilePath(iter.filePath());
+            QString relativePath = dir.relativeFilePath(path);
 
             if (dest.exists(relativePath))
                 continue;
@@ -2116,7 +2128,7 @@ void Builder::mergeOutput(const QList<QDir> &src, const QDir &dest, const QStrin
             if (!found)
                 continue;
 
-            copys[relativePath] = iter.filePath();
+            copys[relativePath] = std::move(path);
         }
     }
 

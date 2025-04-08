@@ -100,6 +100,7 @@ cd build
 %{_datadir}/dbus-1/system.d/*.conf
 %{_datadir}/polkit-1/actions/org.deepin.linglong.PackageManager1.policy
 %{_datadir}/%{name}/config.yaml
+%{_datadir}/%{name}/export-dirs.json
 %{_datadir}/mime/packages/*
 %{_datadir}/locale/*
 %{_datadir}/applications/*

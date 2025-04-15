@@ -318,8 +318,12 @@ ContainerCfgBuilder &ContainerCfgBuilder::bindHostStatics() noexcept
         "/usr/share/fonts",
         "/usr/share/icons",
         "/usr/share/themes",
-        "/usr/share/zoneinfo"
+        "/usr/share/zoneinfo",
         "/var/cache/fontconfig",
+        // TODO It's better to move to volatileMount
+        "/etc/localtime",
+        "/etc/resolv.conf",
+        "/etc/timezone",
     };
 
     hostStaticsMount = std::vector<Mount>{};
@@ -1394,8 +1398,6 @@ bool ContainerCfgBuilder::selfAdjustingMount(std::vector<Mount> &mounts) noexcep
         return false;
     }
     config.root = { .path = "rootfs", .readonly = true };
-
-    config.linux_->rootfsPropagation = RootfsPropagation::Unbindable;
 
     for (size_t i = 0; i < mounts.size(); ++i) {
         auto &mount = mounts[i];

@@ -63,10 +63,9 @@ public:
     auto build(const QStringList &args = { "/project/linglong/entry.sh" }) noexcept
       -> utils::error::Result<void>;
 
-    auto exportUAB(const QString &destination, const ExportOption &option)
+    auto exportUAB(const ExportOption &option, const std::filesystem::path outputFile = {})
       -> utils::error::Result<void>;
-    auto exportLayer(const QString &destination, const QString &compressor, const bool &noExportDevelop)
-      -> utils::error::Result<void>;
+    auto exportLayer(const ExportOption &option) -> utils::error::Result<void>;
 
     static auto extractLayer(const QString &layerPath, const QString &destination)
       -> utils::error::Result<void>;
@@ -80,9 +79,11 @@ public:
     static auto importLayer(repo::OSTreeRepo &repo, const QString &path)
       -> utils::error::Result<void>;
 
-    auto run(const QStringList &modules,
-             const QStringList &args,
-             bool debug = false) -> utils::error::Result<void>;
+    auto
+    run(const QStringList &modules,
+        const QStringList &args,
+        bool debug = false,
+        std::optional<package::Reference> runWith = std::nullopt) -> utils::error::Result<void>;
     auto runtimeCheck() -> utils::error::Result<void>;
 
     void setBuildOptions(const BuilderBuildOptions &options) noexcept { buildOptions = options; }
@@ -103,7 +104,8 @@ private:
     utils::error::Result<void> commitToLocalRepo() noexcept;
     std::unique_ptr<utils::OverlayFS> makeOverlay(QString lowerdir, QString overlayDir) noexcept;
     utils::error::Result<package::Reference> clearDependency(const std::string &ref,
-                                                             bool onlyLocal) noexcept;
+                                                             bool forceRemote,
+                                                             bool fallbackToRemote) noexcept;
     auto generateEntryScript() noexcept -> utils::error::Result<void>;
     auto generateBuildDependsScript() noexcept -> utils::error::Result<bool>;
     auto generateDependsScript() noexcept -> utils::error::Result<bool>;

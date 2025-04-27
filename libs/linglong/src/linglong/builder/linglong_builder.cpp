@@ -75,7 +75,7 @@ namespace {
  */
 utils::error::Result<void> inline copyDir(const QString &src, const QString &dst)
 {
-    LINGLONG_TRACE(QString("copy %1 to %2").arg(src).arg(dst));
+    LINGLONG_TRACE(QString("copy %1 to %2").arg(src, dst));
 
     QDir srcDir(src);
     QDir dstDir(dst);
@@ -86,7 +86,7 @@ utils::error::Result<void> inline copyDir(const QString &src, const QString &dst
         };
     }
 
-    QFileInfoList list =
+    const QFileInfoList list =
       srcDir.entryInfoList(QDir::System | QDir::AllEntries | QDir::NoDotAndDotDot);
 
     for (const auto &info : list) {
@@ -228,18 +228,16 @@ utils::error::Result<void> pullDependency(const package::Reference &ref,
                             .arg(ref.id, -35)                         // NOLINT
                             .arg(ref.version.toString(), -15)         // NOLINT
                             .arg(QString::fromStdString(module), -15) // NOLINT
-                            .arg("downloading")
-                            .arg(progress)
+                            .arg("downloading", progress)
                             .toStdString(),
                           2);
     };
     QObject::connect(&tmpTask, &service::PackageTask::PartChanged, partChanged);
-    printReplacedText(QString("%1%2%3%4 %5")
+    printReplacedText(QString("%1%2%3%4")
                         .arg(ref.id, -35)                         // NOLINT
                         .arg(ref.version.toString(), -15)         // NOLINT
                         .arg(QString::fromStdString(module), -15) // NOLINT
-                        .arg("waiting")
-                        .arg("...")
+                        .arg("waiting ...")
                         .toStdString(),
                       2);
     repo.pull(tmpTask, ref, module);
@@ -277,20 +275,21 @@ utils::error::Result<void> installModule(QStringList installRules,
 
             if (ec) {
                 return LINGLONG_ERR(QString("Failed to create symlink: %1 -> %2: %3")
-                                      .arg(info.filePath())
-                                      .arg(target.c_str())
-                                      .arg(ec.message().c_str()));
+                                      .arg(info.filePath(), target.c_str(), ec.message().c_str()));
             }
             return LINGLONG_OK;
-        } else {
-            QDir(dstPath.left(dstPath.lastIndexOf('/'))).mkpath(".");
-            // QDir(dstPath).mkpath("..");
-            QFile::rename(info.filePath(), dstPath);
-            return LINGLONG_OK;
         }
+
+        auto dstDir = QDir{ dstPath.left(dstPath.lastIndexOf('/')) };
+        if (!dstDir.mkpath(".")) {
+            return LINGLONG_ERR(
+              QString("Failed to create directory: %1").arg(dstDir.absolutePath()));
+        }
+
+        QFile::rename(info.filePath(), dstPath);
+        return LINGLONG_OK;
     };
 
-    auto ruleIndex = 0;
     for (auto rule : installRules) {
         rule = rule.simplified();
         // 跳过注释
@@ -298,9 +297,6 @@ utils::error::Result<void> installModule(QStringList installRules,
             continue;
         }
         qDebug() << "install rule" << rule;
-        // 计算进度
-        ruleIndex++;
-        auto percentage = ruleIndex * 100 / installRules.length(); // NOLINT
         // 如果不以^符号开头，当作普通路径使用
         if (!rule.startsWith("^")) {
             // append $PROJECT_ROOT/output/_build/files to prefix
@@ -415,7 +411,6 @@ utils::error::Result<void> cmdListApp(repo::OSTreeRepo &repo)
 
 utils::error::Result<void> cmdRemoveApp(repo::OSTreeRepo &repo, std::vector<std::string> refs)
 {
-    LINGLONG_TRACE("cmd remove app");
     for (const auto &ref : refs) {
         auto r = package::Reference::parse(QString::fromStdString(ref));
         if (!r.has_value()) {
@@ -542,13 +537,14 @@ utils::error::Result<void> Builder::buildStageFetchSource() noexcept
                    .toStdString(),
                  2);
     auto fetchCacheDir = this->workingDir.absoluteFilePath("linglong/cache");
-    if (!qgetenv("LINGLONG_FETCH_CACHE").isEmpty()) {
+    if (!qEnvironmentVariableIsEmpty("LINGLONG_FETCH_CACHE")) {
         fetchCacheDir = qgetenv("LINGLONG_FETCH_CACHE");
     }
     auto result = fetchSources(*this->project.sources,
                                fetchCacheDir,
                                this->workingDir.absoluteFilePath("linglong/sources"),
                                this->cfg);
+
     if (!result) {
         return LINGLONG_ERR(result);
     }
@@ -571,7 +567,7 @@ utils::error::Result<package::Reference> Builder::clearDependency(const std::str
       repo.clearReference(*fuzzyRef,
                           { .forceRemote = forceRemote, .fallbackToRemote = fallbackToRemote });
     if (!res) {
-        return LINGLONG_ERR(QString{"ref doesn't exist %1"}.arg(fuzzyRef->toString()));
+        return LINGLONG_ERR(QString{ "ref doesn't exist %1" }.arg(fuzzyRef->toString()));
     }
 
     return res;
@@ -898,11 +894,10 @@ include /opt/apps/@id@/files/etc/ld.so.conf)";
           .source = appCache.absoluteFilePath("ld.so.conf").toStdString(),
           .type = "bind" },
       })
-      .setStartContainerHooks(std::vector<ocppi::runtime::config::types::Hook>{
-        ocppi::runtime::config::types::Hook{ .args = std::vector<std::string>{ "ldconfig" },
-                                             .env = {},
-                                             .path = "/sbin/ldconfig",
-                                             .timeout = {} } })
+      .setStartContainerHooks(
+        std::vector<ocppi::runtime::config::types::Hook>{ ocppi::runtime::config::types::Hook{
+          .path = "/sbin/ldconfig",
+        } })
       .forwordDefaultEnv()
       .addMask({
         "/project/linglong/output",
@@ -1063,8 +1058,6 @@ utils::error::Result<void> Builder::buildStagePreCommit() noexcept
 
 utils::error::Result<void> Builder::generateAppConf() noexcept
 {
-    LINGLONG_TRACE("generate application configure");
-
     // generate application's configure file
     auto scriptFile = QString(LINGLONG_LIBEXEC_DIR) + "/app-conf-generator";
     auto useInstalledFile = utils::global::linglongInstalled() && QFile(scriptFile).exists();
@@ -1255,8 +1248,8 @@ utils::error::Result<void> Builder::generateEntries() noexcept
     // 仅导出名单中的目录，以避免意外文件影响系统功能
     const std::filesystem::path exportDirConfigPath = LINGLONG_DATA_DIR "/export-dirs.json";
     if (!std::filesystem::exists(exportDirConfigPath)) {
-        return LINGLONG_ERR(QString{ "this export config file doesn't exist: %1" }.arg(
-          exportDirConfigPath.c_str()));
+        return LINGLONG_ERR(
+          QString{ "this export config file doesn't exist: %1" }.arg(exportDirConfigPath.c_str()));
     }
     auto exportDirConfig =
       linglong::utils::serialize::LoadJSONFile<linglong::api::types::v1::ExportDirs>(
@@ -1286,8 +1279,8 @@ utils::error::Result<void> Builder::generateEntries() noexcept
         }
         // appdata是旧版本的metainfo
         if (path == "share/appdata") {
-            auto ret = copyDir(binaryFiles.absoluteFilePath(path),
-                               binaryEntries.filePath("share/metainfo"));
+            auto ret =
+              copyDir(binaryFiles.absoluteFilePath(path), binaryEntries.filePath("share/metainfo"));
             if (!ret.has_value()) {
                 qWarning() << "link binary entries share to files share/" << path << "failed";
             }
@@ -1380,7 +1373,7 @@ utils::error::Result<void> Builder::commitToLocalRepo() noexcept
                    .arg("Status")
                    .toStdString(),
                  2);
-    for (const auto &module : packageModules) {
+    for (const auto &module : std::as_const(packageModules)) {
         QDir moduleOutput = this->workingDir.absoluteFilePath("linglong/output/" + module);
         info.packageInfoV2Module = module.toStdString();
         auto ret =
@@ -1684,6 +1677,9 @@ utils::error::Result<void> Builder::exportLayer(const ExportOption &option)
     }
 
     auto modules = this->repo.getModuleList(*ref);
+    if (modules.empty()) {
+        return LINGLONG_ERR(QString("no %1 found").arg(ref->toString()));
+    }
 
     package::LayerPackager pkger;
     if (!option.compressor.empty()) {
@@ -1982,18 +1978,52 @@ utils::error::Result<void> Builder::run(const QStringList &modules,
       .type = "bind",
     });
 
-    std::vector<ocppi::runtime::config::types::Hook> startContainer{
-        {
-          .args =
-            std::vector<std::string>{ "/sbin/ldconfig", "-C", "/run/linglong/cache/ld.so.cache" },
-          .env = {},
-          .path = "/sbin/ldconfig",
-          .timeout = {},
-        },
-    };
-
     int64_t uid = getuid();
     int64_t gid = getgid();
+
+    {
+        // Since ldconfig removes and regenerates the cache file, the cache directory must be
+        // writable. Therefore, we must generate the ld cache in a separate running
+        auto containerID = runtime::genContainerID(*curRef);
+        auto bundle = runtime::getBundleDir(containerID);
+        if (!bundle) {
+            return LINGLONG_ERR(bundle);
+        }
+
+        linglong::generator::ContainerCfgBuilder cfgBuilder;
+        cfgBuilder.setAppId(curRef->id.toStdString())
+          .setAppPath(curDir->absoluteFilePath("files").toStdString())
+          .setBasePath(baseDir->absoluteFilePath("files").toStdString())
+          .setAppCache(appCache.absolutePath().toStdString(), false)
+          .setBundlePath(std::move(bundle).value())
+          .addUIdMapping(uid, uid, 1)
+          .addGIdMapping(gid, gid, 1)
+          .bindProc();
+        if (this->project.runtime) {
+            cfgBuilder.setRuntimePath(runtimeDir->absoluteFilePath("files").toStdString());
+        }
+
+        if (!cfgBuilder.build()) {
+            auto err = cfgBuilder.getError();
+            return LINGLONG_ERR("build cfg error: " + QString::fromStdString(err.reason));
+        }
+
+        auto container =
+          this->containerBuilder.create(cfgBuilder, QString::fromStdString(containerID));
+        if (!container) {
+            return LINGLONG_ERR(container);
+        }
+
+        ocppi::runtime::config::types::Process process{
+            .args =
+              std::vector<std::string>{ "/sbin/ldconfig", "-C", "/run/linglong/cache/ld.so.cache" }
+        };
+        ocppi::runtime::RunOption opt{};
+        auto result = (*container)->run(process, opt);
+        if (!result) {
+            return LINGLONG_ERR("failed to generate ld cache", result);
+        }
+    }
 
     linglong::generator::ContainerCfgBuilder cfgBuilder;
     cfgBuilder.setAppId(curRef->id.toStdString())
@@ -2022,7 +2052,6 @@ utils::error::Result<void> Builder::run(const QStringList &modules,
       .bindIPC()
       .forwordDefaultEnv()
       .setExtraMounts(applicationMounts)
-      .setStartContainerHooks(std::move(startContainer))
       .enableSelfAdjustingMount();
     if (this->project.runtime) {
         cfgBuilder.setRuntimePath(runtimeDir->absoluteFilePath("files").toStdString());
@@ -2224,7 +2253,7 @@ utils::error::Result<bool> Builder::generateDependsScript() noexcept
 
 void Builder::takeTerminalForeground()
 {
-    struct sigaction sa = { 0 };
+    struct sigaction sa{};
     sa.sa_handler = SIG_IGN;
     sigaction(SIGTTOU, &sa, NULL);
 
@@ -2343,8 +2372,7 @@ void Builder::mergeOutput(const QList<QDir> &src, const QDir &dest, const QStrin
 
             if (!QFile::link(QString::fromUtf8(buf.data()), to.absoluteFilePath())) {
                 qWarning() << QString("failed to link from %1 to %2")
-                                .arg(to.absoluteFilePath())
-                                .arg(QString::fromUtf8(buf.data()));
+                                .arg(to.absoluteFilePath(), QString::fromUtf8(buf.data()));
             }
         } else if (from.isFile()) {
             if (!QDir(to.absolutePath()).mkpath(".")) {
@@ -2354,8 +2382,7 @@ void Builder::mergeOutput(const QList<QDir> &src, const QDir &dest, const QStrin
 
             if (!QFile::copy(from.absoluteFilePath(), to.absoluteFilePath())) {
                 qWarning() << QString("failed to copy %1 to %2")
-                                .arg(from.absoluteFilePath())
-                                .arg(to.absoluteFilePath());
+                                .arg(from.absoluteFilePath(), to.absoluteFilePath());
             }
         }
     }
@@ -2363,6 +2390,8 @@ void Builder::mergeOutput(const QList<QDir> &src, const QDir &dest, const QStrin
 
 void Builder::printBasicInfo()
 {
+    printMessage("[Builder info]");
+    printMessage(std::string("Linglong Builder Version: ") + LINGLONG_VERSION, 2);
     printMessage("[Build Target]");
     printMessage(this->project.package.id, 2);
     printMessage("[Project Info]");

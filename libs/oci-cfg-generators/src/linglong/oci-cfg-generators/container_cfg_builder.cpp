@@ -225,7 +225,7 @@ ContainerCfgBuilder &ContainerCfgBuilder::bindMedia() noexcept
                        .source = destinationDir,
                        .type = "bind" },
                 Mount{ .destination = "/media",
-                       .options = string_list{ "rbind", "ro", "nosymfollow", "copy-symlink" },
+                       .options = string_list{ "rbind", "ro", "copy-symlink" },
                        .source = "/media",
                        .type = "bind" },
             };
@@ -702,8 +702,8 @@ bool ContainerCfgBuilder::buildTmp() noexcept
     }
 
     std::srand(std::time(0));
-    auto tmpPath = std::filesystem::temp_directory_path() / "linglong"
-      / (appId + "-" + std::to_string(std::rand()));
+    auto tmpPath = std::filesystem::temp_directory_path()
+      / ("linglong_" + std::to_string(::getuid())) / (appId + "-" + std::to_string(std::rand()));
     std::error_code ec;
     if (!std::filesystem::create_directories(tmpPath, ec) && ec) {
         error_.reason = tmpPath.string() + "can't be created";
@@ -986,7 +986,13 @@ bool ContainerCfgBuilder::buildMountIPC() noexcept
             hostXauthFile = std::filesystem::path{ xauthFileEnv };
         }
 
-        if (!std::filesystem::exists(hostXauthFile, ec) && ec) {
+        if (!std::filesystem::exists(hostXauthFile, ec)) {
+            if (ec) {
+                std::cerr << "failed to check XAUTHORITY file " << hostXauthFile << ":"
+                          << ec.message() << std::endl;
+                return;
+            }
+
             std::cerr << "XAUTHORITY file not found at " << hostXauthFile << ":" << ec.message()
                       << std::endl;
             return;
@@ -1381,7 +1387,7 @@ bool ContainerCfgBuilder::selfAdjustingMount(std::vector<Mount> &mounts) noexcep
                             MountNode{ .name = filename,
                                        .ro = true,
                                        .fix = true,
-                                       .mount_idx = static_cast<int>(mounts.size() - 1 )});
+                                       .mount_idx = static_cast<int>(mounts.size() - 1) });
             }
         }
     };

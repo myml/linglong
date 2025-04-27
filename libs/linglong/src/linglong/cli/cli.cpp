@@ -237,8 +237,6 @@ void Cli::onTaskPropertiesChanged(QString interface,                            
                                   QVariantMap changed_properties,                      // NOLINT
                                   [[maybe_unused]] QStringList invalidated_properties) // NOLINT
 {
-    LINGLONG_TRACE("update task properties")
-
     if (interface != task->interface()) {
         return;
     }
@@ -292,6 +290,17 @@ void Cli::onTaskPropertiesChanged(QString interface,                            
             lastMessage = value.toString();
             continue;
         }
+
+        if (key == "Code") {
+            bool ok{ false };
+            auto val = value.toInt(&ok);
+            if (!ok) {
+                qCritical() << "dbus ipc error, Code couldn't convert to int";
+                continue;
+            }
+
+            lastErrorCode = static_cast<utils::error::ErrorCode>(val);
+        }
     }
 
     printProgress();
@@ -316,10 +325,10 @@ void Cli::interaction(QDBusObjectPath object_path, int messageID, QVariantMap ad
 
     switch (messageType) {
     case api::types::v1::InteractionMessageType::Upgrade: {
-        auto tips = QString("The lower version %1 is currently installed. Do you "
-                            "want to continue installing the latest version %2?")
-                      .arg(QString::fromStdString(msg->localRef))
-                      .arg(QString::fromStdString(msg->remoteRef));
+        auto tips =
+          QString("The lower version %1 is currently installed. Do you "
+                  "want to continue installing the latest version %2?")
+            .arg(QString::fromStdString(msg->localRef), QString::fromStdString(msg->remoteRef));
         req.body = tips.toStdString();
     } break;
     case api::types::v1::InteractionMessageType::Downgrade:
@@ -374,8 +383,12 @@ void Cli::onTaskAdded([[maybe_unused]] QDBusObjectPath object_path)
     qDebug() << "task added" << object_path.path();
 }
 
-void Cli::onTaskRemoved(
-  QDBusObjectPath object_path, int state, int subState, QString message, double percentage)
+void Cli::onTaskRemoved(QDBusObjectPath object_path,
+                        int state,
+                        int subState,
+                        QString message,
+                        double percentage,
+                        int code)
 {
     if (object_path.path() != taskObjectPath) {
         return;
@@ -396,6 +409,7 @@ void Cli::onTaskRemoved(
     this->lastSubState = static_cast<api::types::v1::SubState>(subState);
     this->lastMessage = std::move(message);
     this->lastPercentage = percentage;
+    this->lastErrorCode = static_cast<utils::error::ErrorCode>(code);
 
     if (this->lastSubState == api::types::v1::SubState::AllDone) {
         this->printProgress();
@@ -409,9 +423,48 @@ void Cli::onTaskRemoved(
 
 void Cli::printProgress() noexcept
 {
-    LINGLONG_TRACE("print progress")
     if (this->lastState == api::types::v1::State::Unknown) {
         qInfo() << "task is invalid";
+        return;
+    }
+
+    if (this->lastState == api::types::v1::State::Failed) {
+        switch (this->lastErrorCode) {
+        case utils::error::ErrorCode::AppInstallModuleRequireAppFirst:
+            this->printer.printMessage(_("To install the module, one must first install the app."));
+            break;
+        case utils::error::ErrorCode::AppInstallModuleAlreadyExists:
+            this->printer.printMessage(_("Module is already installed."));
+            break;
+        case utils::error::ErrorCode::AppInstallFailed:
+            this->printer.printMessage(_("Install failed"));
+            break;
+        case utils::error::ErrorCode::AppUninstallFailed:
+            this->printer.printMessage(_("Uninstall failed"));
+            break;
+        case utils::error::ErrorCode::AppUpgradeFailed:
+            this->printer.printMessage(_("Upgrade failed"));
+            break;
+        case utils::error::ErrorCode::AppUpgradeNotFound:
+            this->printer.printMessage(_("Application is not installed."));
+            break;
+        case utils::error::ErrorCode::AppUpgradeLatestInstalled:
+            this->printer.printMessage(_("Latest version is already installed."));
+            break;
+        default:
+            this->printer.printTaskState(this->lastPercentage,
+                                         this->lastMessage,
+                                         this->lastState,
+                                         this->lastSubState);
+            return;
+        }
+
+        if (options.verbose) {
+            this->printer.printTaskState(this->lastPercentage,
+                                         this->lastMessage,
+                                         this->lastState,
+                                         this->lastSubState);
+        }
         return;
     }
 
@@ -451,7 +504,7 @@ Cli::Cli(Printer &printer,
                       pkgMan.interface(),
                       "TaskRemoved",
                       this,
-                      SLOT(onTaskRemoved(QDBusObjectPath, int, int, QString, double)))) {
+                      SLOT(onTaskRemoved(QDBusObjectPath, int, int, QString, double, int)))) {
         qFatal("couldn't connect to package manager signal 'TaskRemoved'");
     }
 }
@@ -940,8 +993,6 @@ Cli::getCurrentContainers() const noexcept
 
 int Cli::ps([[maybe_unused]] CLI::App *subcommand)
 {
-    LINGLONG_TRACE("command ps");
-
     auto myContainers = getCurrentContainers();
     if (!myContainers) {
         this->printer.printErr(myContainers.error());
@@ -1204,8 +1255,49 @@ int Cli::install([[maybe_unused]] CLI::App *subcommand)
         std::abort();
     }
 
-    if (result->code != 0) {
-        this->printer.printReply({ .code = result->code, .message = result->message });
+    auto resultCode = static_cast<utils::error::ErrorCode>(result->code);
+
+    if (resultCode != utils::error::ErrorCode::Success) {
+        switch (resultCode) {
+
+        case utils::error::ErrorCode::NetworkError:
+            this->printer.printMessage(_("Network connection failed. Please:"
+                                         "\n1. Check your internet connection"
+                                         "\n2. Verify network proxy settings if used"));
+            break;
+        case utils::error::ErrorCode::AppInstallAlreadyInstalled:
+            this->printer.printMessage(
+              QString{ _("Application already installed, If you want to replace it, try using "
+                         "'ll-cli install %1 --force'") }
+                .arg(params.package.id.c_str()));
+            break;
+        case utils::error::ErrorCode::AppInstallNotFoundFromRemote:
+            this->printer.printMessage(
+              QString{ _("Application %1 is not found in remote repo.") }.arg(
+                params.package.id.c_str()));
+            break;
+        case utils::error::ErrorCode::AppInstallModuleNoVersion:
+            this->printer.printMessage(_("Cannot specify a version when installing a module."));
+            break;
+        case utils::error::ErrorCode::AppInstallNeedDowngrade:
+            this->printer.printMessage(
+              QString{ _("The latest version has been installed. If you want to "
+                         "replace it, try using 'll-cli install %1/version --force'") }
+                .arg(params.package.id.c_str()));
+            break;
+        case utils::error::ErrorCode::Unknown:
+        case utils::error::ErrorCode::AppInstallFailed:
+            this->printer.printMessage(_("Install failed"));
+            break;
+        default:
+            this->printer.printReply({ .code = result->code, .message = result->message });
+            return -1;
+        }
+
+        if (options.verbose) {
+            this->printer.printReply({ .code = result->code, .message = result->message });
+        }
+
         return -1;
     }
 
@@ -1264,10 +1356,9 @@ int Cli::upgrade([[maybe_unused]] CLI::App *subcommand)
             return -1;
         }
         for (const auto &item : *list) {
-            auto fuzzyRef =
-              package::FuzzyReference::parse(QString("%1/%2")
-                                               .arg(QString::fromStdString(item.id))
-                                               .arg(QString::fromStdString(item.oldVersion)));
+            auto fuzzyRef = package::FuzzyReference::parse(
+              QString("%1/%2").arg(QString::fromStdString(item.id),
+                                   QString::fromStdString(item.oldVersion)));
             if (!fuzzyRef) {
                 this->printer.printErr(fuzzyRef.error());
                 return -1;
@@ -1392,57 +1483,74 @@ int Cli::search([[maybe_unused]] CLI::App *subcommand)
 
     QEventLoop loop;
 
-    connect(&this->pkgMan,
-            &api::dbus::v1::PackageManager::SearchFinished,
-            [&](const QString &jobID, const QVariantMap &data) {
-                // Note: once an error occurs, remember to return after exiting the loop.
-                if (result->id->c_str() != jobID) {
-                    return;
-                }
-                auto result =
-                  utils::serialize::fromQVariantMap<api::types::v1::PackageManager1SearchResult>(
-                    data);
-                if (!result) {
-                    this->printer.printErr(result.error());
-                    loop.exit(-1);
-                    return;
-                }
-                // Note: should check return code of PackageManager1SearchResult
-                if (result->code != 0) {
-                    this->printer.printErr(
-                      LINGLONG_ERRV("\n" + QString::fromStdString(result->message), result->code));
-                    loop.exit(result->code);
-                    return;
-                }
+    connect(
+      &this->pkgMan,
+      &api::dbus::v1::PackageManager::SearchFinished,
+      [&](const QString &jobID, const QVariantMap &data) {
+          // Note: once an error occurs, remember to return after exiting the loop.
+          if (result->id->c_str() != jobID) {
+              return;
+          }
+          auto result =
+            utils::serialize::fromQVariantMap<api::types::v1::PackageManager1SearchResult>(data);
+          if (!result) {
+              this->printer.printErr(result.error());
+              loop.exit(-1);
+              return;
+          }
+          // Note: should check return code of PackageManager1SearchResult
+          auto resultCode = static_cast<utils::error::ErrorCode>(result->code);
+          if (resultCode != utils::error::ErrorCode::Success) {
+              if (resultCode == utils::error::ErrorCode::Failed) {
+                  this->printer.printErr(
+                    LINGLONG_ERRV("\n" + QString::fromStdString(result->message), result->code));
+                  loop.exit(result->code);
+                  return;
+              }
 
-                if (!result->packages) {
-                    this->printer.printPackages({});
-                    loop.exit(0);
-                    return;
-                }
+              if (resultCode == utils::error::ErrorCode::NetworkError) {
+                  this->printer.printMessage(_("Network connection failed. Please:"
+                                               "\n1. Check your internet connection"
+                                               "\n2. Verify network proxy settings if used"));
+              }
 
-                auto pkgs = std::move(result->packages).value();
-                if (!options.showDevel) {
-                    auto it = std::remove_if(pkgs.begin(),
-                                             pkgs.end(),
-                                             [](const api::types::v1::PackageInfoV2 &info) {
-                                                 return info.packageInfoV2Module == "develop";
-                                             });
-                    pkgs.erase(it, pkgs.end());
-                }
+              if (options.verbose) {
+                  this->printer.printErr(
+                    LINGLONG_ERRV("\n" + QString::fromStdString(result->message), result->code));
+              }
 
-                if (!options.type.empty()) {
-                    filterPackageInfosFromType(pkgs, options.type);
-                }
+              loop.exit(result->code);
+              return;
+          }
 
-                // default only the latest version is displayed
-                if (!options.showAll) {
-                    filterPackageInfosFromVersion(pkgs);
-                }
+          if (!result->packages) {
+              this->printer.printPackages({});
+              loop.exit(0);
+              return;
+          }
 
-                this->printer.printPackages(pkgs);
-                loop.exit(0);
-            });
+          auto pkgs = std::move(result->packages).value();
+          if (!options.showDevel) {
+              auto it = std::remove_if(pkgs.begin(),
+                                       pkgs.end(),
+                                       [](const api::types::v1::PackageInfoV2 &info) {
+                                           return info.packageInfoV2Module == "develop";
+                                       });
+              pkgs.erase(it, pkgs.end());
+          }
+
+          if (!options.type.empty()) {
+              filterPackageInfosFromType(pkgs, options.type);
+          }
+
+          // default only the latest version is displayed
+          if (!options.showAll) {
+              filterPackageInfosFromVersion(pkgs);
+          }
+
+          this->printer.printPackages(pkgs);
+          loop.exit(0);
+      });
     return loop.exec();
 }
 
@@ -1537,6 +1645,15 @@ int Cli::uninstall([[maybe_unused]] CLI::App *subcommand)
                                                  .fallbackToRemote = false,
                                                });
     if (!ref) {
+        const auto errCode = static_cast<utils::error::ErrorCode>(ref.error().code());
+        if (errCode == utils::error::ErrorCode::AppNotFoundFromLocal) {
+            this->printer.printMessage(_("Application is not installed."));
+
+            if (options.verbose) {
+                this->printer.printErr(ref.error());
+            }
+            return -1;
+        }
         this->printer.printErr(ref.error());
         return -1;
     }
@@ -1591,13 +1708,30 @@ int Cli::uninstall([[maybe_unused]] CLI::App *subcommand)
         return -1;
     }
 
-    if (result->code != 0) {
+    auto resultCode = static_cast<utils::error::ErrorCode>(result->code);
+    if (resultCode != utils::error::ErrorCode::Success) {
         auto err = LINGLONG_ERRV(QString::fromStdString(result->message), result->code);
         if (result->type == "notification") {
             this->notifier->notify(
               api::types::v1::InteractionRequest{ .appName = "ll-cli",
                                                   .summary = result->message });
-        } else {
+            return -1;
+        }
+
+        switch (resultCode) {
+        case utils::error::ErrorCode::AppUninstallNotFoundFromLocal:
+            this->printer.printMessage(_("Application is not installed."));
+            break;
+        case utils::error::ErrorCode::AppUninstallFailed:
+        case utils::error::ErrorCode::Unknown:
+            this->printer.printMessage(_("Uninstall failed"));
+            break;
+        default:
+            this->printer.printErr(err);
+            return -1;
+        }
+
+        if (options.verbose) {
             this->printer.printErr(err);
         }
 
@@ -1633,8 +1767,6 @@ int Cli::uninstall([[maybe_unused]] CLI::App *subcommand)
 
 int Cli::list([[maybe_unused]] CLI::App *subcommand)
 {
-    LINGLONG_TRACE("command list");
-
     if (!options.showUpgradeList) {
         auto pkgs = this->repository.listLocal();
         if (!pkgs) {
@@ -2198,10 +2330,10 @@ Cli::filterPackageInfosFromVersion(std::vector<api::types::v1::PackageInfoV2> &l
     std::unordered_map<std::string, api::types::v1::PackageInfoV2> temp;
 
     for (const auto &info : list) {
-        auto key = QString("%1-%2")
-                     .arg(QString::fromStdString(info.id))
-                     .arg(QString::fromStdString(info.packageInfoV2Module))
-                     .toStdString();
+        auto key =
+          QString("%1-%2")
+            .arg(QString::fromStdString(info.id), QString::fromStdString(info.packageInfoV2Module))
+            .toStdString();
         auto it = temp.find(key);
         if (it == temp.end()) {
             temp[key] = info;
@@ -2509,73 +2641,18 @@ Cli::ensureCache(const package::Reference &ref,
 {
     LINGLONG_TRACE("ensure cache for: " + QString::fromStdString(appLayerItem.info.id));
 
-    int lockfd{ -1 };
     std::error_code ec;
+    // TODO: Here we need to judge the validity of the cache. The directory may be an empty
+    // directory.
     auto appCache = std::filesystem::path(LINGLONG_ROOT) / "cache" / appLayerItem.commit;
-    const auto fileLock = std::filesystem::path("/run/linglong/") / appLayerItem.commit / ".lock";
 
-    struct flock locker{ .l_type = F_WRLCK, .l_whence = SEEK_SET, .l_start = 0, .l_len = 0 };
-
-    // Note: If the cache directory exists, check if there is a file lock.
-    //       If the lock file is not exist, it means that the cache has been generated.
     if (std::filesystem::exists(appCache, ec)) {
-        if (!std::filesystem::exists(fileLock, ec)) {
-            if (ec) {
-                return LINGLONG_ERR(QString::fromStdString(ec.message()), ec.value());
-            }
-            return appCache;
-        }
-
-        lockfd = open(fileLock.c_str(), O_CREAT | O_RDWR, 0644);
-        if (lockfd < 0) {
-            return LINGLONG_ERR("failed to open file lock " % QString::fromStdString(fileLock), -1);
-        }
-        auto closefd = utils::finally::finally([&lockfd] {
-            close(lockfd);
-        });
-
-        while (true) {
-            // Block here until the write lock is successfully set
-            using namespace std::chrono_literals;
-            if (::fcntl(lockfd, F_SETLK, &locker) == 0) {
-                break;
-            }
-            if (errno == EACCES || errno == EAGAIN || errno == EINTR) {
-                std::this_thread::sleep_for(100ms);
-            } else {
-                return LINGLONG_ERR(QString("failed to set lock ") % ::strerror(errno), -1);
-            }
-        }
-        locker.l_type = F_UNLCK;
-        if (::fcntl(lockfd, F_SETLK, &locker)) {
-            return LINGLONG_ERR("failed to unlock" % QString::fromStdString(appCache), -1);
-        }
-
+        qDebug() << "The cache has been generated.";
         return appCache;
     }
 
     if (ec) {
         return LINGLONG_ERR(QString::fromStdString(ec.message()), ec.value());
-    }
-
-    if (!std::filesystem::create_directories(fileLock.parent_path(), ec) && ec) {
-        return LINGLONG_ERR(
-          QString{ "failed to create runtime directory %1: %2" }.arg(fileLock.parent_path().c_str(),
-                                                                     ec.message().c_str()));
-    }
-
-    lockfd = open(fileLock.c_str(), O_CREAT | O_RDWR, 0644);
-    if (lockfd < 0) {
-        return LINGLONG_ERR(
-          QString{ "failed to open file lock %1: %2" }.arg(fileLock.c_str(), ::strerror(errno)));
-    }
-
-    auto closefd = utils::finally::finally([&lockfd] {
-        close(lockfd);
-    });
-
-    if (::fcntl(lockfd, F_SETLK, &locker) == -1) {
-        return LINGLONG_ERR("failed to lock" + QString::fromStdString(appCache), -1);
     }
 
     // Try to generate cache here
@@ -2592,11 +2669,6 @@ Cli::ensureCache(const package::Reference &ref,
             _("The cache generation failed, please uninstall and reinstall the application.") });
     }
     process.close();
-
-    locker.l_type = F_UNLCK;
-    if (::fcntl(lockfd, F_SETLK, &locker)) {
-        return LINGLONG_ERR("failed to unlock" + QString::fromStdString(appCache), -1);
-    }
 
     return appCache;
 }

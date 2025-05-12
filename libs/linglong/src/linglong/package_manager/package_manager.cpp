@@ -8,7 +8,10 @@
 
 #include "linglong/api/types/helper.h"
 #include "linglong/api/types/v1/Generators.hpp"
+#include "linglong/api/types/v1/PackageInfoV2.hpp"
 #include "linglong/api/types/v1/PackageManager1JobInfo.hpp"
+#include "linglong/api/types/v1/PackageManager1PruneResult.hpp"
+#include "linglong/api/types/v1/Repo.hpp"
 #include "linglong/api/types/v1/State.hpp"
 #include "linglong/package/layer_file.h"
 #include "linglong/package/layer_packager.h"
@@ -90,14 +93,9 @@ fuzzyReferenceFromPackage(const api::types::v1::PackageManager1Package &pkg) noe
         channel = QString::fromStdString(*pkg.channel);
     }
 
-    std::optional<package::Version> version;
+    std::optional<QString> version;
     if (pkg.version) {
-        auto tmpVersion = package::Version::parse(QString::fromStdString(*pkg.version));
-        if (!tmpVersion) {
-            return tl::unexpected(std::move(tmpVersion.error()));
-        }
-
-        version = *tmpVersion;
+        version = QString::fromStdString(*pkg.version);
     }
 
     auto fuzzyRef = package::FuzzyReference::create(channel,
@@ -508,8 +506,7 @@ void PackageManager::setConfiguration(const QVariantMap &parameters) noexcept
 QVariantMap PackageManager::installFromLayer(const QDBusUnixFileDescriptor &fd,
                                              const api::types::v1::CommonOptions &options) noexcept
 {
-    auto layerFileRet =
-      package::LayerFile::New(QString("/proc/%1/fd/%2").arg(getpid()).arg(fd.fileDescriptor()));
+    auto layerFileRet = package::LayerFile::New(fd.fileDescriptor());
     if (!layerFileRet) {
         return toDBusReply(layerFileRet);
     }
@@ -763,8 +760,11 @@ QVariantMap PackageManager::installFromLayer(const QDBusUnixFileDescriptor &fd,
 QVariantMap PackageManager::installFromUAB(const QDBusUnixFileDescriptor &fd,
                                            const api::types::v1::CommonOptions &options) noexcept
 {
-    auto uabRet = package::UABFile::loadFromFile(
-      QString("/proc/%1/fd/%2").arg(getpid()).arg(fd.fileDescriptor()));
+    if (!fd.isValid()) {
+        return toDBusReply(-1, "invalid file descriptor");
+    }
+
+    auto uabRet = package::UABFile::loadFromFile(fd.fileDescriptor());
     if (!uabRet) {
         return toDBusReply(uabRet);
     }
@@ -1203,13 +1203,14 @@ auto PackageManager::Install(const QVariantMap &parameters) noexcept -> QVariant
     }
 
     // we need latest local reference
-    std::optional<package::Version> version = fuzzyRef->version;
+    std::optional<QString> version = fuzzyRef->version;
     fuzzyRef->version.reset();
     auto localRef = this->repo.clearReference(*fuzzyRef,
                                               {
                                                 .fallbackToRemote = false // NOLINT
                                               });
     // set version back
+
     fuzzyRef->version = version;
 
     api::types::v1::PackageManager1RequestInteractionAdditionalMessage additionalMessage;
@@ -1695,7 +1696,8 @@ utils::error::Result<package::Reference> PackageManager::latestRemoteReference(
     }
     auto ref = this->repo.clearReference(fuzzyRef,
                                          {
-                                           .forceRemote = true // NOLINT
+                                           .forceRemote = true, // NOLINT
+                                           .semanticMatching = true,
                                          });
     if (!ref) {
         return LINGLONG_ERR(ref);
@@ -1720,6 +1722,8 @@ auto PackageManager::Update(const QVariantMap &parameters) noexcept -> QVariantM
                                installedAppFuzzyRef.error().message());
         }
 
+        qInfo() << "installedApp Info: " << installedAppFuzzyRef->toString();
+
         auto ref = this->repo.clearReference(*installedAppFuzzyRef,
                                              {
                                                .fallbackToRemote = false // NOLINT
@@ -1733,6 +1737,8 @@ auto PackageManager::Update(const QVariantMap &parameters) noexcept -> QVariantM
             return toDBusReply(ref.error().code(),
                                installedAppFuzzyRef->toString() + " not installed.");
         }
+
+        qInfo() << "localRef Info: " << ref->toString();
 
         auto layerItem = this->repo.getLayerItem(*ref);
         if (!layerItem) {
@@ -1873,27 +1879,54 @@ auto PackageManager::Search(const QVariantMap &parameters) noexcept -> QVariantM
         return toDBusReply(fuzzyRef);
     }
     auto jobID = QUuid::createUuid().toString();
-    auto ref = *fuzzyRef;
-    m_search_queue.runTask([this, jobID, ref]() {
-        auto pkgInfos = this->repo.listRemote(ref);
-        if (!pkgInfos.has_value()) {
-            qWarning() << "list remote failed: " << pkgInfos.error().message();
-            Q_EMIT this->SearchFinished(
-              jobID,
-              toDBusReply(pkgInfos.error().code(), pkgInfos.error().message()));
-            return;
+    auto repoConfig = this->repo.getConfig();
+
+    m_search_queue.runTask([this,
+                            jobID,
+                            params = std::move(paras).value(),
+                            ref = std::move(*fuzzyRef),
+                            repo = std::move(repoConfig)]() {
+        std::map<std::string, std::vector<api::types::v1::PackageInfoV2>> pkgs;
+        for (const auto &repoAlias : params.repos) {
+            auto it =
+              std::find_if(repo.repos.begin(), repo.repos.end(), [&repoAlias](const auto &r) {
+                  return r.alias.value_or(r.name) == repoAlias;
+              });
+            if (it == repo.repos.end()) {
+                qWarning() << "repo" << repoAlias.c_str() << "not found";
+                continue;
+            }
+
+            auto pkgInfosRet = this->repo.listRemote(ref, *it);
+            if (!pkgInfosRet) {
+                qWarning() << "list remote failed: " << pkgInfosRet.error().message();
+                Q_EMIT this->SearchFinished(
+                  jobID,
+                  toDBusReply(pkgInfosRet.error().code(), pkgInfosRet.error().message()));
+                return;
+            }
+
+            if (pkgInfosRet->empty()) {
+                continue;
+            }
+
+            pkgs.emplace(it->alias.value_or(it->name), std::move(*pkgInfosRet));
         }
-        auto result = api::types::v1::PackageManager1SearchResult{
-            .packages = *pkgInfos,
+
+        Q_EMIT this->SearchFinished(
+          jobID,
+          utils::serialize::toQVariantMap(api::types::v1::PackageManager1SearchResult{
+            .packages = std::move(pkgs),
             .code = 0,
             .message = "",
-        };
-        Q_EMIT this->SearchFinished(jobID, utils::serialize::toQVariantMap(result));
+            .type = "",
+          }));
     });
     auto result = utils::serialize::toQVariantMap(api::types::v1::PackageManager1JobInfo{
       .id = jobID.toStdString(),
       .code = 0,
       .message = "",
+      .type = "",
     });
     return result;
 }
@@ -1925,6 +1958,7 @@ void PackageManager::pullDependency(PackageTask &taskContext,
                                                  {
                                                    .forceRemote = false,
                                                    .fallbackToRemote = true,
+                                                   .semanticMatching = true,
                                                  });
         if (!runtime) {
             taskContext.updateState(linglong::api::types::v1::State::Failed,
@@ -1968,6 +2002,7 @@ void PackageManager::pullDependency(PackageTask &taskContext,
                                           {
                                             .forceRemote = false,
                                             .fallbackToRemote = true,
+                                            .semanticMatching = true,
                                           });
     if (!base) {
         taskContext.updateState(linglong::api::types::v1::State::Failed,
@@ -2003,7 +2038,7 @@ auto PackageManager::Prune() noexcept -> QVariantMap
             Q_EMIT this->PruneFinished(jobID, toDBusReply(ret));
             return;
         }
-        auto result = api::types::v1::PackageManager1SearchResult{
+        auto result = api::types::v1::PackageManager1PruneResult{
             .packages = pkgs,
             .code = 0,
             .message = "",
@@ -2056,6 +2091,7 @@ PackageManager::Prune(std::vector<api::types::v1::PackageInfoV2> &removed) noexc
                                                         {
                                                           .forceRemote = false,
                                                           .fallbackToRemote = false,
+                                                          .semanticMatching = true,
                                                         });
             if (!runtimeRef) {
                 qWarning() << runtimeRef.error().message();
@@ -2074,6 +2110,7 @@ PackageManager::Prune(std::vector<api::types::v1::PackageInfoV2> &removed) noexc
                                                  {
                                                    .forceRemote = false,
                                                    .fallbackToRemote = false,
+                                                   .semanticMatching = true,
                                                  });
         if (!baseRef) {
             qWarning() << baseRef.error().message();
@@ -2158,6 +2195,7 @@ utils::error::Result<void> prepareLayerDir(const repo::OSTreeRepo &repo,
                                                  {
                                                    .forceRemote = false,
                                                    .fallbackToRemote = false,
+                                                   .semanticMatching = true,
                                                  });
         if (!runtimeRefRet) {
             return LINGLONG_ERR(runtimeRefRet);
@@ -2189,6 +2227,7 @@ utils::error::Result<void> prepareLayerDir(const repo::OSTreeRepo &repo,
                                        {
                                          .forceRemote = false,
                                          .fallbackToRemote = false,
+                                         .semanticMatching = true,
                                        });
     if (!baseRef) {
         return LINGLONG_ERR(baseRef);
@@ -2294,9 +2333,7 @@ utils::error::Result<void> PackageManager::generateCache(const package::Referenc
       .setBundlePath(*bundle)
       .addUIdMapping(uid, uid, 1)
       .addGIdMapping(gid, gid, 1)
-      .bindSys()
-      .bindProc()
-      .bindDev()
+      .bindDefault()
       .bindCgroup()
       .bindRun()
       .bindUserGroup()

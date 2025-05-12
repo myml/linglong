@@ -55,7 +55,6 @@ public:
     {
         std::string name;
         bool ro;
-        bool fix;
         int mount_idx;
         std::vector<int> childs_idx;
         int parent_idx;
@@ -108,6 +107,7 @@ public:
     ContainerCfgBuilder &addUIdMapping(int64_t containerID, int64_t hostID, int64_t size) noexcept;
     ContainerCfgBuilder &addGIdMapping(int64_t containerID, int64_t hostID, int64_t size) noexcept;
 
+    ContainerCfgBuilder &bindDefault() noexcept;
     ContainerCfgBuilder &bindSys() noexcept;
     ContainerCfgBuilder &bindProc() noexcept;
     ContainerCfgBuilder &bindDev() noexcept;
@@ -187,10 +187,21 @@ private:
     bool buildEnv() noexcept;
     bool mergeMount() noexcept;
     bool finalize() noexcept;
-    bool selfAdjustingMount(std::vector<ocppi::runtime::config::types::Mount> &mounts) noexcept;
-    std::vector<ocppi::runtime::config::types::Mount>
-    generateMounts(const std::vector<MountNode> &mountpoints,
-                   std::vector<ocppi::runtime::config::types::Mount> &mounts) noexcept;
+
+    // adjust mount
+    int findChild(int parent, const std::string &name) noexcept;
+    int insertChild(int parent, MountNode node) noexcept;
+    int insertChildRecursively(const std::filesystem::path &path, bool &inserted) noexcept;
+    int findNearestMountNode(int child) noexcept;
+    bool shouldFix(int node, std::filesystem::path &fixPath) noexcept;
+    std::string getRelativePath(int parent, int node) noexcept;
+    bool adjustNode(int node,
+                    const std::filesystem::path &path,
+                    const std::filesystem::path fixPath) noexcept;
+    bool constructMountpointsTree() noexcept;
+    void tryFixMountpointsTree() noexcept;
+    void generateMounts() noexcept;
+    bool selfAdjustingMount() noexcept;
 
     // path settings
     std::string appId;
@@ -253,6 +264,11 @@ private:
 
     // self-adjusting mount
     bool selfAdjustingMountEnabled = false;
+    // mountpoints is a prefix tree of all mounts path
+    // .mount_idx > 0 represents the path is a mount point, and it's the subscript of the array
+    // mounts
+    std::vector<MountNode> mountpoints;
+    std::vector<ocppi::runtime::config::types::Mount> mounts;
 
     bool isolateNetWorkEnabled = false;
 

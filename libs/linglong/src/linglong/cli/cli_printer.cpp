@@ -100,6 +100,47 @@ void CLIPrinter::printPackages(const std::vector<api::types::v1::PackageInfoV2> 
     }
 }
 
+void CLIPrinter::printSearchResult(const std::map<std::string, std::vector<api::types::v1::PackageInfoV2>> &list)
+{
+    if (list.empty()) {
+        std::cout << _("No packages found in the remote repo.") << std::endl;
+        return;
+    }
+    std::cout << "\033[38;5;214m" << std::left << adjustDisplayWidth(qUtf8Printable(_("ID")), 43)
+              << adjustDisplayWidth(qUtf8Printable(_("Name")), 33)
+              << adjustDisplayWidth(qUtf8Printable(_("Version")), 16)
+              << adjustDisplayWidth(qUtf8Printable(_("Channel")), 16)
+              << adjustDisplayWidth(qUtf8Printable(_("Module")), 12)
+              << adjustDisplayWidth(qUtf8Printable(_("Repo")), 10)
+              << qUtf8Printable(_("Description")) << "\033[0m" << std::endl;
+    for (const auto &[pkgRepo, packages] : list) {
+        for (const auto &pkg : packages) {
+            auto simpleDescription = QString::fromStdString(pkg.description.value_or("")).simplified();
+            auto simpleDescriptionWStr = simpleDescription.toStdWString();
+            auto simpleDescriptionWcswidth = wcswidth(simpleDescriptionWStr.c_str(), -1);
+            if (simpleDescriptionWcswidth > 56) {
+                simpleDescriptionWStr = subwstr(simpleDescriptionWStr, 53) + L"...";
+                simpleDescription = QString::fromStdWString(simpleDescriptionWStr);
+            }
+
+            auto name = QString::fromStdString(pkg.name).simplified();
+            auto nameWStr = name.toStdWString();
+            auto nameWcswidth = wcswidth(nameWStr.c_str(), -1);
+            if (nameWcswidth > 33) {
+                nameWStr = subwstr(nameWStr, 29) + L"...";
+                nameWcswidth = wcswidth(nameWStr.c_str(), -1);
+                name = QString::fromStdWString(nameWStr);
+            }
+            auto nameStr = name.toStdString();
+            auto nameOffset = nameStr.size() - nameWcswidth;
+            std::cout << std::setw(43) << pkg.id + " " << std::setw(33 + nameOffset) << nameStr + " "
+                    << std::setw(16) << pkg.version + " " << std::setw(16) << pkg.channel + " "
+                    << std::setw(12) << pkg.packageInfoV2Module + " " << std::setw(10) << pkgRepo + " "
+                    << simpleDescription.toStdString() << std::endl;
+        }
+    }
+}
+
 void CLIPrinter::printContainers(const std::vector<api::types::v1::CliContainer> &list)
 {
     if (list.empty()) {
@@ -167,28 +208,40 @@ void CLIPrinter::printReply(const api::types::v1::CommonResult &reply)
 void CLIPrinter::printRepoConfig(const api::types::v1::RepoConfigV2 &repoInfo)
 {
     std::cout << "Default: " << repoInfo.defaultRepo << std::endl;
-    // get the max length of url
+    // get the max length
+    constexpr size_t MAX_URL_LENGTH = 100;
+    size_t maxNameLength = 0;
     size_t maxUrlLength = 0;
+    size_t maxAliasLength = 0;
     for (const auto &repo : repoInfo.repos) {
+        maxNameLength = std::max(maxNameLength, repo.name.size());
         maxUrlLength = std::max(maxUrlLength, repo.url.size());
+        maxAliasLength = std::max(maxAliasLength, repo.alias.value_or(repo.name).size());
     }
-    std::cout << "\033[38;5;214m" << std::left << std::setw(11)
-              << adjustDisplayWidth(_("Name"), 11);
+
+    // url 超长省略
+    maxUrlLength = std::min(maxUrlLength, MAX_URL_LENGTH);
+
+    std::cout << "\033[38;5;214m" << std::left << std::setw(maxNameLength + 2)
+              << adjustDisplayWidth(_("Name"), maxNameLength + 2);
     std::cout << std::setw(maxUrlLength + 2) << adjustDisplayWidth(_("Url"), maxUrlLength + 2)
-              << std::setw(11) << adjustDisplayWidth(_("Alias"), 11) << std::setw(10)
-              << _("Priority") << "\033[0m" << std::endl;
+              << std::setw(maxAliasLength + 2) << adjustDisplayWidth(_("Alias"), maxAliasLength + 2)
+              << std::setw(10) << _("Priority") << "\033[0m" << std::endl;
 
     auto repos = repoInfo.repos;
     // 按照优先级从高到低排序
-    std::sort(repos.begin(),
-              repos.end(),
-              [](const api::types::v1::Repo &a, const api::types::v1::Repo &b) {
-                  return a.priority > b.priority;
-              });
+    std::stable_sort(repos.begin(),
+                     repos.end(),
+                     [](const api::types::v1::Repo &a, const api::types::v1::Repo &b) {
+                         return a.priority > b.priority;
+                     });
     for (const auto &repo : repos) {
-        std::cout << std::left << std::setw(11) << repo.name << std::setw(maxUrlLength + 2)
-                  << repo.url << std::setw(11) << repo.alias.value_or(repo.name) << std::setw(10)
-                  << repo.priority << std::endl;
+        // url 超长省略
+        const std::string &url =
+          (repo.url.size() > MAX_URL_LENGTH) ? repo.url.substr(0, 97) + "..." : repo.url;
+        std::cout << std::left << std::setw(maxNameLength + 2) << repo.name
+                  << std::setw(maxUrlLength + 2) << url << std::setw(maxAliasLength + 2)
+                  << repo.alias.value_or(repo.name) << std::setw(10) << repo.priority << std::endl;
     }
 }
 

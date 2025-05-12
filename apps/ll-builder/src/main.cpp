@@ -106,11 +106,12 @@ parseProjectConfig(const QString &filename)
     if (!project) {
         return project;
     }
-    auto version = linglong::package::Version::parse(QString::fromStdString(project->package.version));
+    auto version = linglong::package::VersionV1::parse(QString::fromStdString(project->package.version));
     if (!version || !version->tweak) {
         return LINGLONG_ERR("Please ensure the package.version number has three parts formatted as "
                             "'MAJOR.MINOR.PATCH.TWEAK'");
     }
+
     if (project->modules.has_value()) {
         if (std::any_of(project->modules->begin(), project->modules->end(), [](const auto &module) {
                 return module.name == "binary";
@@ -122,6 +123,26 @@ parseProjectConfig(const QString &filename)
     if (project->package.kind == "app" && !project->command.has_value()) {
         return LINGLONG_ERR(
           "'command' field is missing, app should hava command as the default startup command");
+    }
+
+    // 校验bese和runtime版本是否合法
+    auto baseFuzzyRef = linglong::package::FuzzyReference::parse(project->base.c_str());
+    if (!baseFuzzyRef) {
+        return LINGLONG_ERR("failed to parse base field", baseFuzzyRef);
+    }
+    auto ret = linglong::package::Version::validateDependVersion(baseFuzzyRef->version.value());
+    if (!ret) {
+        return LINGLONG_ERR("base version is not valid", ret);
+    }
+    if (project->runtime) {
+        auto runtimeFuzzyRef = linglong::package::FuzzyReference::parse(project->runtime.value().c_str());
+        if (!runtimeFuzzyRef) {
+            return LINGLONG_ERR("failed to parse runtime field", runtimeFuzzyRef);
+        }
+        ret = linglong::package::Version::validateDependVersion(runtimeFuzzyRef->version.value());
+        if (!ret) {
+            return LINGLONG_ERR("runtime version is not valid", ret);
+        }
     }
     return project;
 }

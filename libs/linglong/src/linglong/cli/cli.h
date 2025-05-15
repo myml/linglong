@@ -99,10 +99,11 @@ private:
     filePathMapping(const std::vector<std::string> &command) const noexcept;
     static std::string mappingFile(const std::filesystem::path &file) noexcept;
     static std::string mappingUrl(std::string_view url) noexcept;
-    static void filterPackageInfosByType(std::map<std::string,std::vector<api::types::v1::PackageInfoV2>> &list,
-                                           const std::string &type) noexcept;
-    static utils::error::Result<void>
-    filterPackageInfosByVersion(std::map<std::string,std::vector<api::types::v1::PackageInfoV2>> &list) noexcept;
+    static void filterPackageInfosByType(
+      std::map<std::string, std::vector<api::types::v1::PackageInfoV2>> &list,
+      const std::string &type) noexcept;
+    static utils::error::Result<void> filterPackageInfosByVersion(
+      std::map<std::string, std::vector<api::types::v1::PackageInfoV2>> &list) noexcept;
     void printProgress() noexcept;
     [[nodiscard]] utils::error::Result<std::vector<api::types::v1::CliContainer>>
     getCurrentContainers() const noexcept;
@@ -113,7 +114,7 @@ private:
     utils::error::Result<std::vector<api::types::v1::UpgradeListResult>>
     listUpgradable(const std::vector<api::types::v1::PackageInfoV2> &pkgs);
     utils::error::Result<std::vector<api::types::v1::UpgradeListResult>>
-    listUpgradable(const std::string &type);
+    listUpgradable(const std::string &type = "app");
     int generateCache(const package::Reference &ref);
     utils::error::Result<std::string>
     ensureCache(const package::Reference &ref,
@@ -124,8 +125,12 @@ private:
 private Q_SLOTS:
     // maybe use in the future
     void onTaskAdded(QDBusObjectPath object_path);
-    void onTaskRemoved(
-      QDBusObjectPath object_path, int state, int subState, QString message, double percentage, int code);
+    void onTaskRemoved(QDBusObjectPath object_path,
+                       int state,
+                       int subState,
+                       QString message,
+                       double percentage,
+                       int code);
     void onTaskPropertiesChanged(QString interface,
                                  QVariantMap changed_properties,
                                  QStringList invalidated_properties);

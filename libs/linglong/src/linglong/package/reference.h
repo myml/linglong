@@ -7,6 +7,7 @@
 #pragma once
 
 #include "linglong/api/types/v1/PackageInfoV2.hpp"
+#include "linglong/api/types/v1/Repo.hpp"
 #include "linglong/package/architecture.h"
 #include "linglong/package/version.h"
 
@@ -44,10 +45,16 @@ private:
               const Architecture &architecture);
 };
 
+struct ReferenceWithRepo
+{
+    api::types::v1::Repo repo;
+    Reference reference;
+};
+
 } // namespace linglong::package
 
 // Note: declare here, so we can use std::unordered_map<Reference, ...> in other place
-template<>
+template <>
 struct std::hash<linglong::package::Reference>
 {
     size_t operator()(const linglong::package::Reference &ref) const noexcept

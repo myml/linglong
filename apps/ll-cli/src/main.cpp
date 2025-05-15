@@ -119,10 +119,11 @@ int lockCheck() noexcept
         ::close(fd);
     });
 
-    struct flock lock_info
-    {
-        .l_type = F_RDLCK, .l_whence = SEEK_SET, .l_start = 0, .l_len = 0, .l_pid = 0
-    };
+    struct flock lock_info{ .l_type = F_RDLCK,
+                            .l_whence = SEEK_SET,
+                            .l_start = 0,
+                            .l_len = 0,
+                            .l_pid = 0 };
 
     if (::fcntl(fd, F_GETLK, &lock_info) == -1) {
         qCritical() << "failed to get lock" << lock;
@@ -205,9 +206,7 @@ You can report bugs to the linyaps team under this project: https://github.com/O
                         .confirmOpt = false,
                         .verbose = false };
 
-    commandParser.add_flag("-v,--verbose",
-                           options.verbose,
-                           _("Show debug info (verbose logs)"));
+    commandParser.add_flag("-v,--verbose", options.verbose, _("Show debug info (verbose logs)"));
 
     // groups
     auto *CliBuildInGroup = _("Managing installed applications and runtimes");
@@ -325,6 +324,9 @@ ll-cli install stable:org.deepin.demo/0.0.0.1/x86_64
       ->check(validatorString);
     cliInstall->add_option("--module", options.module, _("Install a specify module"))
       ->type_name("MODULE")
+      ->check(validatorString);
+    cliInstall->add_option("--repo", options.repo, _("Install from a specific repo"))
+      ->type_name("REPO")
       ->check(validatorString);
     cliInstall->add_flag("--force", options.forceOpt, _("Force install the application"));
     cliInstall->add_flag("-y", options.confirmOpt, _("Automatically answer yes to all questions"));

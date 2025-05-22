@@ -35,6 +35,7 @@ pfl_add_library(
   src/linglong/cli/printer.h
   src/linglong/cli/terminal_notifier.cpp
   src/linglong/cli/terminal_notifier.h
+  src/linglong/extension/extension.cpp
   src/linglong/package/architecture.cpp
   src/linglong/package/architecture.h
   src/linglong/package/fallback_version.cpp
@@ -78,6 +79,8 @@ pfl_add_library(
   src/linglong/runtime/container_builder.h
   src/linglong/runtime/container.cpp
   src/linglong/runtime/container.h
+  src/linglong/runtime/run_context.cpp
+  src/linglong/runtime/run_context.h
   TESTS
   ll-tests
   COMPILE_FEATURES

@@ -717,8 +717,11 @@ utils::error::Result<QDir> OSTreeRepo::ensureEmptyLayerDir(const std::string &co
     }
 
     if (!std::filesystem::create_directories(dir, ec)) {
-        return LINGLONG_ERR(
-          QString{ "failed to create layer dir %1: %2" }.arg(dir.c_str(), ec.message().c_str()));
+        if (ec) {
+            return LINGLONG_ERR(
+              QString{ "failed to create layer dir %1: %2" }.arg(dir.c_str(),
+                                                                 ec.message().c_str()));
+        }
     }
 
     return QDir{ dir.c_str() };
@@ -2529,7 +2532,7 @@ utils::error::Result<package::LayerDir> OSTreeRepo::getMergedModuleDir(
     return LINGLONG_ERR("merged doesn't exist");
 }
 
-utils::error::Result<std::shared_ptr<package::LayerDir>> OSTreeRepo::getMergedModuleDir(
+utils::error::Result<package::LayerDir> OSTreeRepo::getMergedModuleDir(
   const package::Reference &ref, const QStringList &loadModules) const noexcept
 {
     LINGLONG_TRACE("merge modules");
@@ -2585,11 +2588,7 @@ utils::error::Result<std::shared_ptr<package::LayerDir>> OSTreeRepo::getMergedMo
             return LINGLONG_ERR(QString("ostree_repo_checkout_at %1").arg(mergeTmp), gErr);
         }
     }
-    auto *ptr = new package::LayerDir(mergeTmp);
-    return std::shared_ptr<package::LayerDir>(ptr, [](package::LayerDir *ptr) {
-        ptr->removeRecursively();
-        delete ptr;
-    });
+    return mergeTmp;
 }
 
 utils::error::Result<void> OSTreeRepo::mergeModules() const noexcept

@@ -15,6 +15,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+extern char **environ;
+
 namespace linglong::generator {
 
 using string_list = std::vector<std::string>;
@@ -252,9 +254,9 @@ ContainerCfgBuilder &ContainerCfgBuilder::bindMedia() noexcept
     return *this;
 }
 
-ContainerCfgBuilder &ContainerCfgBuilder::forwordDefaultEnv() noexcept
+ContainerCfgBuilder &ContainerCfgBuilder::forwardDefaultEnv() noexcept
 {
-    return forwordEnv(std::vector<std::string>{
+    return forwardEnv(std::vector<std::string>{
       "DISPLAY",
       "LANG",
       "LANGUAGE",
@@ -291,9 +293,24 @@ ContainerCfgBuilder &ContainerCfgBuilder::forwordDefaultEnv() noexcept
       "TERM" });
 }
 
-ContainerCfgBuilder &ContainerCfgBuilder::forwordEnv(std::vector<std::string> envList) noexcept
+ContainerCfgBuilder &
+ContainerCfgBuilder::forwardEnv(const std::vector<std::string> &envList) noexcept
 {
-    envForword = envList;
+    if (!envList.empty()) {
+        for (const auto &env : envList) {
+            envForward.emplace(env);
+        }
+
+        return *this;
+    }
+
+    for (char **env = environ; *env != nullptr; ++env) {
+        auto str = std::string_view(*env);
+        auto idx = str.find('=');
+        if (idx != std::string_view::npos) {
+            envForward.emplace(str.begin(), str.begin() + idx);
+        }
+    }
 
     return *this;
 }
@@ -470,13 +487,13 @@ bool ContainerCfgBuilder::checkValid() noexcept
         return false;
     }
 
-    if (!basePath) {
+    if (basePath.empty()) {
         error_.reason = "base path is not set";
         error_.code = BUILD_PARAM_ERROR;
         return false;
     }
 
-    if (!bundlePath) {
+    if (bundlePath.empty()) {
         error_.reason = "bundle path is empty";
         error_.code = BUILD_PARAM_ERROR;
         return false;
@@ -505,7 +522,7 @@ bool ContainerCfgBuilder::prepare() noexcept
     auto process = Process{ .args = string_list{ "bash" }, .cwd = "/" };
     config.process = std::move(process);
 
-    config.root = { .path = *basePath, .readonly = basePathRo };
+    config.root = { .path = basePath, .readonly = basePathRo };
 
     return true;
 }
@@ -1121,12 +1138,10 @@ bool ContainerCfgBuilder::buildQuirkVolatile() noexcept
 
 bool ContainerCfgBuilder::buildEnv() noexcept
 {
-    if (envForword) {
-        for (const auto &key : *envForword) {
-            auto *value = getenv(key.c_str());
-            if (value) {
-                environment[key] = value;
-            }
+    for (const auto &key : envForward) {
+        auto *value = getenv(key.c_str());
+        if (value != nullptr) {
+            environment.emplace(key, value);
         }
     }
 
@@ -1134,7 +1149,7 @@ bool ContainerCfgBuilder::buildEnv() noexcept
         environment["LINGLONG_APPID"] = appId;
     }
 
-    auto envShFile = *bundlePath / "00env.sh";
+    auto envShFile = bundlePath / "00env.sh";
     std::ofstream ofs(envShFile);
     if (!ofs.is_open()) {
         error_.reason = envShFile.string() + " can't be created";
@@ -1356,7 +1371,7 @@ bool ContainerCfgBuilder::shouldFix(int node, std::filesystem::path &fixPath) no
     }
 
     // only bind from layers should fix
-    if (!(root.rfind(*basePath, 0) == 0 || (runtimePath && root.rfind(*runtimePath, 0) == 0)
+    if (!(root.rfind(basePath, 0) == 0 || (runtimePath && root.rfind(*runtimePath, 0) == 0)
           || (appPath && root.rfind(*appPath, 0) == 0))) {
         return false;
     }
@@ -1574,7 +1589,7 @@ bool ContainerCfgBuilder::selfAdjustingMount() noexcept
     // Remounting as tmpfs requires an alternate rootfs context to avoid obscuring underlying files,
     // so adjust root and change root path to bundlePath/rootfs
     adjustNode(0, config.root->path, "");
-    auto rootfs = *bundlePath / "rootfs";
+    auto rootfs = bundlePath / "rootfs";
     std::error_code ec;
     if (!std::filesystem::create_directories(rootfs, ec) && ec) {
         error_.reason = rootfs.string() + " can't be created";

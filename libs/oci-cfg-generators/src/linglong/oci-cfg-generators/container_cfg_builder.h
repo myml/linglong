@@ -11,7 +11,8 @@
 #include "ocppi/runtime/config/types/Mount.hpp"
 
 #include <filesystem>
-#include <map>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace linglong::generator {
 
@@ -93,11 +94,13 @@ public:
 
     std::optional<std::filesystem::path> getBasePath() { return basePath; }
 
-    ContainerCfgBuilder &setBundlePath(std::filesystem::path path) noexcept
+    ContainerCfgBuilder &setBundlePath(const std::filesystem::path &path) noexcept
     {
         bundlePath = path;
         return *this;
     }
+
+    const std::filesystem::path &getBundlePath() const noexcept { return bundlePath; }
 
     ContainerCfgBuilder &setAppCache(std::filesystem::path path, bool isRo = true) noexcept
     {
@@ -123,8 +126,8 @@ public:
     ContainerCfgBuilder &bindUserGroup() noexcept;
     ContainerCfgBuilder &bindMedia() noexcept;
 
-    ContainerCfgBuilder &forwordDefaultEnv() noexcept;
-    ContainerCfgBuilder &forwordEnv(std::vector<std::string> envList) noexcept;
+    ContainerCfgBuilder &forwardDefaultEnv() noexcept;
+    ContainerCfgBuilder &forwardEnv(const std::vector<std::string> &envList = {}) noexcept;
 
     ContainerCfgBuilder &bindHostRoot() noexcept;
     ContainerCfgBuilder &bindHostStatics() noexcept;
@@ -216,8 +219,8 @@ private:
     std::string appId;
     std::optional<std::filesystem::path> runtimePath;
     std::optional<std::filesystem::path> appPath;
-    std::optional<std::filesystem::path> basePath;
-    std::optional<std::filesystem::path> bundlePath;
+    std::filesystem::path basePath;
+    std::filesystem::path bundlePath;
     std::optional<std::filesystem::path> appCache;
 
     bool runtimePathRo = true;
@@ -250,8 +253,8 @@ private:
     std::optional<std::vector<ocppi::runtime::config::types::Mount>> ldCacheMount;
 
     // environment
-    std::optional<std::vector<std::string>> envForword;
-    std::map<std::string, std::string> environment;
+    std::unordered_set<std::string> envForward;
+    std::unordered_map<std::string, std::string> environment;
     std::optional<ocppi::runtime::config::types::Mount> envMount;
 
     // home dir

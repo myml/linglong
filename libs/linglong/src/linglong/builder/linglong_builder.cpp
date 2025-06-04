@@ -1879,7 +1879,8 @@ utils::error::Result<void> Builder::run(const QStringList &modules,
           .addUIdMapping(uid, uid, 1)
           .addGIdMapping(gid, gid, 1)
           .bindDefault()
-          .addExtraMounts(applicationMounts);
+          .addExtraMounts(applicationMounts)
+          .enableSelfAdjustingMount();
 
         if (!cfgBuilder.build()) {
             auto err = cfgBuilder.getError();
@@ -1888,15 +1889,16 @@ utils::error::Result<void> Builder::run(const QStringList &modules,
 
         auto container =
           this->containerBuilder.create(cfgBuilder,
-                                        QString::fromStdString(buildContext.getContainerId()));
+                                        QString::fromStdString(runContext.getContainerId()));
         if (!container) {
             return LINGLONG_ERR(container);
         }
 
-        ocppi::runtime::config::types::Process process{
-            .args =
-              std::vector<std::string>{ "/sbin/ldconfig", "-C", "/run/linglong/cache/ld.so.cache" }
-        };
+        ocppi::runtime::config::types::Process process{ .args = std::vector<std::string>{
+                                                          "/sbin/ldconfig",
+                                                          "-X",
+                                                          "-C",
+                                                          "/run/linglong/cache/ld.so.cache" } };
         ocppi::runtime::RunOption opt{};
         auto result = (*container)->run(process, opt);
         if (!result) {
@@ -2009,7 +2011,8 @@ utils::error::Result<void> Builder::runFromRepo(const package::Reference &ref,
             .destination = "/etc/ld.so.conf.d/zz_deepin-linglong-app.conf",
             .options = { { "rbind", "ro" } },
             .source = ldConfPath,
-            .type = "bind" });
+            .type = "bind" })
+          .enableSelfAdjustingMount();
 
         // write ld.so.conf
         std::string triplet = ref.arch.getTriplet().toStdString();
@@ -2035,10 +2038,11 @@ utils::error::Result<void> Builder::runFromRepo(const package::Reference &ref,
             return LINGLONG_ERR(container);
         }
 
-        ocppi::runtime::config::types::Process process{
-            .args =
-              std::vector<std::string>{ "/sbin/ldconfig", "-C", "/run/linglong/cache/ld.so.cache" }
-        };
+        ocppi::runtime::config::types::Process process{ .args = std::vector<std::string>{
+                                                          "/sbin/ldconfig",
+                                                          "-X",
+                                                          "-C",
+                                                          "/run/linglong/cache/ld.so.cache" } };
         ocppi::runtime::RunOption opt{};
         auto result = (*container)->run(process, opt);
         if (!result) {

@@ -749,6 +749,14 @@ OSTreeRepo::OSTreeRepo(const QDir &path,
         qFatal("%s", msg.c_str());
     }
 
+    // To avoid glib start thread
+    // set GIO_USE_VFS to local and GVFS_REMOTE_VOLUME_MONITOR_IGNORE to 1
+    linglong::utils::command::EnvironmentVariableGuard gioGuard{ "GIO_USE_VFS", "local" };
+    linglong::utils::command::EnvironmentVariableGuard gvfsGuard{
+        "GVFS_REMOTE_VOLUME_MONITOR_IGNORE",
+        "1"
+    };
+
     g_autoptr(GError) gErr = nullptr;
     g_autoptr(GFile) repoPath = nullptr;
     g_autoptr(OstreeRepo) ostreeRepo = nullptr;
@@ -1806,6 +1814,14 @@ void OSTreeRepo::unexportReference(const package::Reference &ref) noexcept
         }
 
         if (!info.isSymLink()) {
+            // update-desktop-database and update-mime-database will generate system files in
+            // specify a directory. these files do not belong to the applications and should not be
+            // printed in the log.
+            if (info.absoluteFilePath().contains("share/mime")
+                || info.absoluteFilePath().contains("share/applications")) {
+                continue;
+            }
+
             // NOTE: Everything in entries should be directory or symbol link.
             // But it can be some cache file, we should not remove it too.
             qWarning() << "Invalid file detected." << info.absoluteFilePath();

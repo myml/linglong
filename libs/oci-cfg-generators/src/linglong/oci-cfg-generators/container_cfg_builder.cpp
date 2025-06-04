@@ -315,6 +315,20 @@ ContainerCfgBuilder::forwardEnv(const std::vector<std::string> &envList) noexcep
     return *this;
 }
 
+ContainerCfgBuilder &
+ContainerCfgBuilder::appendEnv(const std::map<std::string, std::string> &envMap) noexcept
+{
+    for (const auto &[key, value] : envMap) {
+        if (envAppend.find(key) != envAppend.end()) {
+            std::cerr << "env " << key << " is already exist";
+        } else {
+            envAppend[key] = value;
+        }
+    }
+
+    return *this;
+}
+
 ContainerCfgBuilder &ContainerCfgBuilder::bindHostRoot() noexcept
 {
     hostRootMount = {
@@ -351,6 +365,7 @@ ContainerCfgBuilder &ContainerCfgBuilder::bindHostStatics() noexcept
         "/etc/localtime",
         "/etc/resolv.conf",
         "/etc/timezone",
+        "/etc/hosts"
     };
 
     hostStaticsMount = std::vector<Mount>{};
@@ -1143,6 +1158,10 @@ bool ContainerCfgBuilder::buildEnv() noexcept
         if (value != nullptr) {
             environment.emplace(key, value);
         }
+    }
+
+    for (const auto &[key, value] : envAppend) {
+        environment[key] = value;
     }
 
     if (appPath) {

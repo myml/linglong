@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.11.4)
 
 project(
   linglong
-  VERSION 1.8.0
+  VERSION 1.9.0
   DESCRIPTION "a container based application package manager for Linux desktop"
   HOMEPAGE_URL "https://github.com/OpenAtom-Linyaps/linyaps"
   LANGUAGES CXX C)
@@ -53,9 +53,18 @@ set(GETTEXT_DOMAIN_NAME
     "linyaps"
     CACHE STRING "The name of gettext domain.")
 set(QT_VERSION_MAJOR CACHE STRING "The major version of qt.")
-set(LINGLONG_DESKTOP_EXPORT_PATH
-    "share/applications"
-    CACHE STRING "The path to export linglong desktop files.")
+set(LINGLONG_EXPORT_PATH
+    "share"
+    CACHE STRING
+          "The path to export linglong config files, it must end with share.")
+
+if(NOT LINGLONG_EXPORT_PATH MATCHES ".*share$")
+  message(
+    WARNING
+      "LINGLONG_EXPORT_PATH '${LINGLONG_EXPORT_PATH}' must end with 'share'"
+  )
+  set(LINGLONG_EXPORT_PATH "share")
+endif()
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(PFL)
@@ -171,18 +180,23 @@ endfunction()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+include(GNUInstallDirs)
+# depends on GNUInstallDirs
+configure_file(configure.h.in ${CMAKE_CURRENT_BINARY_DIR}/configure.h @ONLY)
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
+
 # build ll-build-utils only
 if(BUILD_LINGLONG_BUILDER_UTILS_IN_BOX)
-    pfl_init(AUTO)
-    pfl_add_libraries(
-        LIBS
-        api
-        ocppi
-        oci-cfg-generators
-        APPS
-        ll-builder-utils
-        uab)
-    return()
+  pfl_init(AUTO)
+  pfl_add_libraries(
+    LIBS
+    api
+    ocppi
+    oci-cfg-generators
+    APPS
+    ll-builder-utils
+    uab)
+  return()
 endif()
 
 set(CMAKE_AUTOMOC ON)
@@ -255,8 +269,6 @@ pfl_init(AUTO)
 add_subdirectory(external/http)
 add_subdirectory(tools/qdbusxml2cpp)
 
-include(GNUInstallDirs)
-
 pfl_add_libraries(
   LIBS
   api
@@ -275,7 +287,7 @@ pfl_add_libraries(
   ll-session-helper)
 
 if(ENABLE_LINGLONG_APP_BUILDER_UTILS)
-    add_subdirectory(apps/ll-builder-utils)
+  add_subdirectory(apps/ll-builder-utils)
 endif()
 
 add_subdirectory(misc)

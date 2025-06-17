@@ -21,13 +21,13 @@ This package is a linglong package framework.
 
 %package        -n linglong-bin
 Summary:        Linglong package manager
-Requires:       linglong-box = %{version}-%{release}
+Requires:       linglong-box
 %description    -n linglong-bin
 Linglong package management command line tool.
 
 %package        -n linglong-builder
 Summary:        Linglong build tools
-Requires:       linglong-box = %{version}-%{release} linglong-bin = %{version}-%{release}
+Requires:       linglong-box linglong-bin = %{version}-%{release}
 %description    -n linglong-builder
 This package is a tool that makes it easy to build applications and dependencies.
 

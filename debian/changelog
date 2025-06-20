@@ -1,3 +1,13 @@
+linglong (1.9.1-1) unstable; urgency=medium
+
+  * fix: correctly pass argument by vector.
+  * fix: fix build failure caused by removed file.
+  * fix: generate ld cache before builder run.
+  * fix: Correctly quote arguments in container entrypoint script.
+  * fix: prevent crash in prune command after loop exit.
+
+ -- dengbo <dengbo@deepin.org>  Fri, 20 Jun 2025 18:16:52 +0800
+
 linglong (1.9.0-1) unstable; urgency=medium
 
   * release 1.9.0-1.

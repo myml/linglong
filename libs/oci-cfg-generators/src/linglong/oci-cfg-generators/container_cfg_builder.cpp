@@ -10,9 +10,13 @@
 #include "linglong/api/types/v1/Generators.hpp"
 #include "linglong/api/types/v1/OciConfigurationPatch.hpp"
 #include "ocppi/runtime/config/types/Generators.hpp"
+#include "sha256.h"
+
+#include <linux/limits.h>
 
 #include <algorithm>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <vector>
 
@@ -36,6 +40,30 @@ using ocppi::runtime::config::types::NamespaceReference;
 using ocppi::runtime::config::types::NamespaceType;
 using ocppi::runtime::config::types::Process;
 using ocppi::runtime::config::types::RootfsPropagation;
+
+namespace {
+bool bindIfExist(std::vector<Mount> &mounts,
+                 std::filesystem::path source,
+                 std::string destination = "",
+                 bool ro = true) noexcept
+{
+    std::error_code ec;
+    if (!std::filesystem::exists(source, ec)) {
+        return false;
+    }
+
+    if (destination.empty()) {
+        destination = source.string();
+    }
+
+    mounts.emplace_back(Mount{ .destination = destination,
+                               .options = string_list{ "rbind", ro ? "ro" : "rw" },
+                               .source = source,
+                               .type = "bind" });
+
+    return true;
+}
+} // namespace
 
 ContainerCfgBuilder &ContainerCfgBuilder::addUIdMapping(int64_t containerID,
                                                         int64_t hostID,
@@ -354,33 +382,19 @@ ContainerCfgBuilder &ContainerCfgBuilder::bindHostRoot() noexcept
 
 ContainerCfgBuilder &ContainerCfgBuilder::bindHostStatics() noexcept
 {
-    std::vector<std::string> statics{
+    std::vector<std::filesystem::path> statics{
         "/etc/machine-id",
-        "/etc/resolvconf",
         // FIXME: support for host /etc/ssl, ref https://github.com/p11-glue/p11-kit
         "/usr/lib/locale",
         "/usr/share/fonts",
         "/usr/share/icons",
         "/usr/share/themes",
-        "/usr/share/zoneinfo",
         "/var/cache/fontconfig",
-        // TODO It's better to move to volatileMount
-        "/etc/localtime",
-        "/etc/resolv.conf",
-        "/etc/timezone",
-        "/etc/hosts"
     };
 
     hostStaticsMount = std::vector<Mount>{};
-    std::error_code ec;
     for (const auto &loc : statics) {
-        if (!std::filesystem::exists(loc, ec)) {
-            continue;
-        }
-        hostStaticsMount->emplace_back(Mount{ .destination = loc,
-                                              .options = string_list{ "rbind", "ro" },
-                                              .source = loc,
-                                              .type = "bind" });
+        bindIfExist(*hostStaticsMount, loc);
     }
 
     return *this;
@@ -469,8 +483,9 @@ ContainerCfgBuilder &ContainerCfgBuilder::addMask(const std::vector<std::string>
     return *this;
 }
 
-std::string ContainerCfgBuilder::ldConf(const std::string &triplet)
+std::string ContainerCfgBuilder::ldConf(const std::string &triplet) const
 {
+    std::vector<std::string> factors;
     std::string ldRawConf;
     auto appendLdConf = [&ldRawConf, &triplet](const std::string &prefix) {
         ldRawConf.append(prefix + "/lib\n");
@@ -480,17 +495,41 @@ std::string ContainerCfgBuilder::ldConf(const std::string &triplet)
 
     if (runtimePath) {
         appendLdConf(runtimeMountPoint);
+        factors.push_back(runtimePath->string());
     }
 
     if (appPath) {
         appendLdConf(std::filesystem::path{ "/opt/apps" } / appId / "files");
+        factors.push_back(appPath->string());
     }
 
     if (extensionMount) {
         for (const auto &extension : *extensionMount) {
             appendLdConf(extension.destination);
+            if (extension.source) {
+                factors.push_back(*extension.source);
+            }
         }
     }
+
+    std::sort(factors.begin(), factors.end());
+
+    digest::SHA256 sha256;
+    for (const auto &factor : factors) {
+        sha256.update(reinterpret_cast<const std::byte *>(factor.c_str()), factor.size());
+    }
+    std::array<std::byte, 32> digest{};
+    sha256.final(digest.data());
+
+    std::stringstream stream;
+    stream << "# ";
+    stream << std::setfill('0') << std::hex;
+    for (auto v : digest) {
+        stream << std::setw(2) << static_cast<unsigned int>(v);
+    }
+    stream << std::endl;
+
+    ldRawConf.insert(0, stream.str());
 
     return ldRawConf;
 }
@@ -893,20 +932,7 @@ bool ContainerCfgBuilder::buildMountIPC() noexcept
         return false;
     }
 
-    auto bindIfExist = [this](std::string_view source, std::string_view destination) mutable {
-        std::error_code ec;
-        if (!std::filesystem::exists(source, ec)) {
-            return;
-        }
-
-        auto realDest = destination.empty() ? source : destination;
-        ipcMount->emplace_back(Mount{ .destination = std::string{ realDest },
-                                      .options = string_list{ "rbind" },
-                                      .source = std::string{ source },
-                                      .type = "bind" });
-    };
-
-    bindIfExist("/tmp/.X11-unix", "");
+    bindIfExist(*ipcMount, "/tmp/.X11-unix", "", false);
 
     // TODO 应该参考规范文档实现更完善的地址解析支持
     // https://dbus.freedesktop.org/doc/dbus-specification.html#addresses
@@ -948,7 +974,7 @@ bool ContainerCfgBuilder::buildMountIPC() noexcept
           std::string("unix:path=/run/dbus/system_bus_socket") + options;
     }();
 
-    [this, &bindIfExist]() {
+    [this]() {
         auto *XDGRuntimeDirEnv = getenv("XDG_RUNTIME_DIR"); // NOLINT
         if (XDGRuntimeDirEnv == nullptr) {
             return;
@@ -977,10 +1003,14 @@ bool ContainerCfgBuilder::buildMountIPC() noexcept
 
         auto cognitiveXDGRuntimeDir = std::filesystem::path{ environment["XDG_RUNTIME_DIR"] };
 
-        bindIfExist((hostXDGRuntimeDir / "pulse").string(),
-                    (cognitiveXDGRuntimeDir / "pulse").string());
-        bindIfExist((hostXDGRuntimeDir / "gvfs").string(),
-                    (cognitiveXDGRuntimeDir / "gvfs").string());
+        bindIfExist(*ipcMount,
+                    hostXDGRuntimeDir / "pulse",
+                    (cognitiveXDGRuntimeDir / "pulse").string(),
+                    false);
+        bindIfExist(*ipcMount,
+                    hostXDGRuntimeDir / "gvfs",
+                    (cognitiveXDGRuntimeDir / "gvfs").string(),
+                    false);
 
         [this, &hostXDGRuntimeDir, &cognitiveXDGRuntimeDir]() {
             auto *waylandDisplayEnv = getenv("WAYLAND_DISPLAY"); // NOLINT
@@ -1136,6 +1166,82 @@ bool ContainerCfgBuilder::buildLDCache() noexcept
     return true;
 }
 
+bool ContainerCfgBuilder::buildMountLocalTime() noexcept
+{
+    // always bind host's localtime
+    // assume /etc/localtime is a symlink to /usr/share/zoneinfo/XXX/NNN
+    localtimeMount = std::vector<Mount>{};
+
+    std::filesystem::path localtime{ "/etc/localtime" };
+    std::error_code ec;
+    if (std::filesystem::exists(localtime, ec)) {
+        bool isSymLink = false;
+        if (std::filesystem::is_symlink(localtime, ec)) {
+            isSymLink = true;
+        }
+        localtimeMount->emplace_back(Mount{ .destination = localtime.string(),
+                                            .options = isSymLink ? string_list{ "copy-symlink" }
+                                                                 : string_list{ "rbind", "ro" },
+                                            .source = localtime,
+                                            .type = "bind" });
+    }
+
+    bindIfExist(*localtimeMount, "/usr/share/zoneinfo");
+    bindIfExist(*localtimeMount, "/etc/timezone");
+
+    return true;
+}
+
+bool ContainerCfgBuilder::buildMountNetworkConf() noexcept
+{
+    networkConfMount = std::vector<Mount>{};
+
+    std::filesystem::path resolvConf{ "/etc/resolv.conf" };
+    std::error_code ec;
+    if (std::filesystem::exists(resolvConf, ec)) {
+        if (std::filesystem::is_symlink(resolvConf, ec) && hostRootMount) {
+            // If /etc/resolv.conf is a symlink, its target may be a relative path that is
+            // invalid inside the container. To work around this, we create a new symlink
+            // in the bundle directory pointing to the actual target, and then mount it with
+            // the 'copy-symlink' option, which tells the runtime to recreate the symlink
+            // inside the container.
+            std::array<char, PATH_MAX + 1> buf{};
+            auto *rpath = realpath(resolvConf.string().c_str(), buf.data());
+            if (rpath == nullptr) {
+                error_.reason =
+                  "Failed to read symlink " + resolvConf.string() + ": " + strerror(errno);
+                error_.code = BUILD_NETWORK_CONF_ERROR;
+                return false;
+            }
+
+            std::filesystem::path target = std::filesystem::path{ "/run/host/rootfs" }
+              / std::filesystem::path{ rpath }.lexically_relative("/");
+            auto bundleResolvConf = bundlePath / "resolv.conf";
+            std::filesystem::create_symlink(target, bundleResolvConf, ec);
+            if (ec) {
+                error_.reason =
+                  "Failed to create symlink " + bundleResolvConf.string() + ": " + ec.message();
+                error_.code = BUILD_NETWORK_CONF_ERROR;
+                return false;
+            }
+
+            networkConfMount->emplace_back(Mount{ .destination = resolvConf.string(),
+                                                  .options = string_list{ "copy-symlink" },
+                                                  .source = bundleResolvConf,
+                                                  .type = "bind" });
+        } else {
+            networkConfMount->emplace_back(Mount{ .destination = resolvConf.string(),
+                                                  .options = string_list{ "rbind", "ro" },
+                                                  .source = resolvConf,
+                                                  .type = "bind" });
+        }
+    }
+
+    bindIfExist(*networkConfMount, "/etc/resolvconf");
+    bindIfExist(*networkConfMount, "/etc/hosts");
+    return true;
+}
+
 // TODO
 bool ContainerCfgBuilder::buildQuirkVolatile() noexcept
 {
@@ -1233,17 +1339,31 @@ bool ContainerCfgBuilder::applyPatch() noexcept
         return false;
     }
     for (const auto &entry : iter) {
+        const auto &path = entry.path();
         if (entry.is_regular_file(ec)) {
-            const auto &path = entry.path();
-            // application-specific patch will be applied last
-            if (path.stem().string() == appId) {
-                appPatchFiles.emplace_back(path);
-                continue;
-            }
             globalPatchFiles.emplace_back(path);
+        } else if (entry.is_directory(ec)) {
+            if (path.filename().string() == appId) {
+                auto iterApp = std::filesystem::directory_iterator{
+                    path,
+                    std::filesystem::directory_options::skip_permission_denied,
+                    ec
+                };
+                if (ec) {
+                    error_.reason =
+                      "failed to iterator directory " + path.string() + ": " + ec.message();
+                }
+                for (const auto &entryApp : iterApp) {
+                    if (!entryApp.is_regular_file(ec)) {
+                        continue;
+                    }
+                    appPatchFiles.emplace_back(entryApp.path());
+                }
+            }
         }
     }
     std::sort(globalPatchFiles.begin(), globalPatchFiles.end());
+    std::sort(appPatchFiles.begin(), appPatchFiles.end());
 
     auto doPatch = [this](const std::vector<std::filesystem::path> &patchFiles) -> bool {
         for (const auto &patchFile : patchFiles) {
@@ -1520,6 +1640,14 @@ bool ContainerCfgBuilder::mergeMount() noexcept
 
     if (ldCacheMount) {
         std::move(ldCacheMount->begin(), ldCacheMount->end(), std::back_inserter(mounts));
+    }
+
+    if (localtimeMount) {
+        std::move(localtimeMount->begin(), localtimeMount->end(), std::back_inserter(mounts));
+    }
+
+    if (networkConfMount) {
+        std::move(networkConfMount->begin(), networkConfMount->end(), std::back_inserter(mounts));
     }
 
     if (privateMount) {
@@ -1897,7 +2025,7 @@ bool ContainerCfgBuilder::build() noexcept
         return false;
     }
 
-    if (!buildMountIPC()) {
+    if (!buildMountIPC() || !buildMountLocalTime() || !buildMountNetworkConf()) {
         return false;
     }
 

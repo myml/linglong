@@ -744,7 +744,6 @@ int Cli::run([[maybe_unused]] CLI::App *subcommand)
 
     std::error_code ec;
     auto socketDir = cfgBuilder.getBundlePath() / "init";
-    qInfo() << "socket dir" << socketDir.c_str();
     std::filesystem::create_directories(socketDir, ec);
     if (ec) {
         this->printer.printErr(LINGLONG_ERRV(ec.message().c_str()));
@@ -2551,7 +2550,7 @@ Cli::RequestDirectories(const api::types::v1::PackageInfoV2 &info) noexcept
     auto rawData = dialogProc.read(4);
     auto *len = reinterpret_cast<uint32_t *>(rawData.data());
     rawData = dialogProc.read(*len);
-    auto version = utils::serialize::LoadJSON<api::types::v1::DialogMessage>(rawData);
+    auto version = utils::serialize::LoadJSON<api::types::v1::DialogMessage>(rawData.data());
     if (!version) {
         dialogProc.kill();
         return LINGLONG_ERR("error reply from dialog:" + version.error().message());
@@ -2795,13 +2794,18 @@ int Cli::dir([[maybe_unused]] CLI::App *subcommand)
         return -1;
     }
 
-    auto layerItem = this->repository.getLayerItem(*ref);
-    if (!layerItem) {
-        this->printer.printErr(layerItem.error());
+    std::string module = "binary";
+    if (!options.module.empty()) {
+        module = options.module;
+    }
+
+    auto layerDir = this->repository.getLayerDir(*ref, module);
+    if (!layerDir) {
+        this->printer.printErr(layerDir.error());
         return -1;
     }
 
-    std::cout << layerItem->commit << std::endl;
+    std::cout << layerDir->absolutePath().toStdString() << std::endl;
     return 0;
 }
 

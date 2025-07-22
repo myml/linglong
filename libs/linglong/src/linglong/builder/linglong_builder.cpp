@@ -519,10 +519,10 @@ utils::error::Result<void> Builder::buildStageFetchSource() noexcept
     if (!qEnvironmentVariableIsEmpty("LINGLONG_FETCH_CACHE")) {
         fetchCacheDir = qgetenv("LINGLONG_FETCH_CACHE");
     }
-    auto result = fetchSources(*this->project.sources,
-                               fetchCacheDir,
-                               this->workingDir.absoluteFilePath("linglong/sources"),
-                               this->cfg);
+    // clean sources directory on every build
+    auto fetchSourcesDir = QDir(this->workingDir.absoluteFilePath("linglong/sources"));
+    fetchSourcesDir.removeRecursively();
+    auto result = fetchSources(*this->project.sources, fetchCacheDir, fetchSourcesDir, this->cfg);
 
     if (!result) {
         return LINGLONG_ERR(result);
@@ -760,7 +760,8 @@ utils::error::Result<void> Builder::processBuildDepends() noexcept
         .options = { { "rbind", "ro" } },
         .source = this->workingDir.absolutePath().toStdString(),
         .type = "bind" })
-      .forwardDefaultEnv();
+      .forwardDefaultEnv()
+      .appendEnv("LINYAPS_INIT_SINGLE_MODE", "1");
 
     // overwrite runtime overlay directory
     if (cfgBuilder.getRuntimePath()) {
@@ -895,7 +896,8 @@ utils::error::Result<bool> Builder::buildStageBuild(const QStringList &args) noe
       .addMask({
         "/project/linglong/output",
         "/project/linglong/overlay",
-      });
+      })
+      .appendEnv("LINYAPS_INIT_SINGLE_MODE", "1");
 
     if (this->buildOptions.isolateNetWork) {
         cfgBuilder.isolateNetWork();
@@ -956,6 +958,12 @@ utils::error::Result<bool> Builder::buildStageBuild(const QStringList &args) noe
     process.cwd = "/project";
     process.env = { {
       "PREFIX=" + installPrefix,
+      // During the build stage, we use overlayfs where /etc/ld.so.cache is safe
+      // to serve as the dynamic library cache. This allows direct invocation of
+      // ldconfig without the -C option.
+      //
+      // Note: LINGLONG_LD_SO_CACHE is retained here solely for backward compatibility.
+      "LINGLONG_LD_SO_CACHE=/etc/ld.so.cache",
       "TRIPLET=" + triplet,
     } };
     process.noNewPrivileges = true;
@@ -1034,7 +1042,8 @@ utils::error::Result<void> Builder::buildStagePreCommit() noexcept
         .options = { { "rbind", "rw" } },
         .source = this->workingDir.absolutePath().toStdString(),
         .type = "bind" })
-      .forwardDefaultEnv();
+      .forwardDefaultEnv()
+      .appendEnv("LINYAPS_INIT_SINGLE_MODE", "1");
 
     if (cfgBuilder.getRuntimePath()) {
         cfgBuilder.setRuntimePath(runtimeOverlay->mergedDirPath().toStdString(), false);
@@ -1907,7 +1916,8 @@ utils::error::Result<void> Builder::run(const QStringList &modules,
           .addGIdMapping(gid, gid, 1)
           .bindDefault()
           .addExtraMounts(applicationMounts)
-          .enableSelfAdjustingMount();
+          .enableSelfAdjustingMount()
+          .appendEnv("LINYAPS_INIT_SINGLE_MODE", "1");
 
         // write ld.so.conf
         std::string triplet = curRef->arch.getTriplet().toStdString();
@@ -1970,12 +1980,15 @@ utils::error::Result<void> Builder::run(const QStringList &modules,
       .bindIPC()
       .forwardDefaultEnv()
       .addExtraMounts(applicationMounts)
-      .enableSelfAdjustingMount();
+      .enableSelfAdjustingMount()
+      .appendEnv("LINYAPS_INIT_SINGLE_MODE", "1");
+
 #ifdef LINGLONG_FONT_CACHE_GENERATOR
-    cfgBuilder.enableFontCache();
+    cfgBuilder.enableFontCache()
 #endif
 
-    if (!cfgBuilder.build()) {
+      if (!cfgBuilder.build())
+    {
         auto err = cfgBuilder.getError();
         return LINGLONG_ERR("build cfg error: " + QString::fromStdString(err.reason));
     }
@@ -2051,7 +2064,8 @@ utils::error::Result<void> Builder::runFromRepo(const package::Reference &ref,
             .options = { { "rbind", "ro" } },
             .source = ldConfPath,
             .type = "bind" })
-          .enableSelfAdjustingMount();
+          .enableSelfAdjustingMount()
+          .appendEnv("LINYAPS_INIT_SINGLE_MODE", "1");
 
         // write ld.so.conf
         std::string triplet = ref.arch.getTriplet().toStdString();
@@ -2105,7 +2119,8 @@ utils::error::Result<void> Builder::runFromRepo(const package::Reference &ref,
         .options = { { "rbind", "rw" } },
         .source = this->workingDir.absolutePath().toStdString(),
         .type = "bind" })
-      .enableSelfAdjustingMount();
+      .enableSelfAdjustingMount()
+      .appendEnv("LINYAPS_INIT_SINGLE_MODE", "1");
 
     if (!cfgBuilder.build()) {
         auto err = cfgBuilder.getError();
@@ -2133,19 +2148,24 @@ utils::error::Result<void> Builder::runtimeCheck()
 {
     LINGLONG_TRACE("runtime check");
     printMessage("[Runtime Check]");
-    // Do some checks after run container
-    if (!this->buildOptions.skipCheckOutput && this->project.package.kind == "app") {
-        printMessage("Start runtime check", 2);
-        auto ret =
-          this->run(packageModules, { { QString{ LINGLONG_BUILDER_HELPER } + "/main-check.sh" } });
-        if (!ret) {
-            printMessage("Runtime check failed", 2);
-            return LINGLONG_ERR(ret);
-        }
-    } else {
-        printMessage("Skip runtime check", 2);
+    // skip runtime check for non-app packages
+    if (this->project.package.kind != "app") {
+        printMessage("Runtime check skipped", 2);
+        return LINGLONG_OK;
     }
-
+    printMessage("Start runtime check", 2);
+    // 导出uab时需要使用main-check统计的信息，所以无论是否跳过检查，都需要执行main-check
+    auto ret =
+      this->run(packageModules, { { QString{ LINGLONG_BUILDER_HELPER } + "/main-check.sh" } });
+    // ignore runtime check if skipCheckOutput is set
+    if (this->buildOptions.skipCheckOutput) {
+        printMessage("Runtime check ignored", 2);
+        return LINGLONG_OK;
+    }
+    if (!ret) {
+        printMessage("Runtime check failed", 2);
+        return LINGLONG_ERR(ret);
+    }
     printMessage("Runtime check done", 2);
     return LINGLONG_OK;
 }

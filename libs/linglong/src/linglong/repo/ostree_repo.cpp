@@ -89,6 +89,9 @@ struct ostreeUserData
     guint64 total_delta_part_usize{ 0 };
     char *ostree_status{ nullptr };
     service::PackageTask *taskContext{ nullptr };
+    guint64 needed_archived{ 0 };
+    guint64 needed_unpacked{ 0 };
+    guint64 needed_objects{ 0 };
     std::string status{ "Beginning to pull data" };
     long double progress{ 0 };
     long double last_total{ 0 };
@@ -229,7 +232,8 @@ void progress_changed(OstreeAsyncProgress *progress, gpointer user_data)
             data->status = "Downloading files";
         }
     }
-    Q_EMIT data->taskContext->PartChanged(data->fetched, data->requested);
+    auto requested = data->needed_objects ? data->needed_objects : data->requested;
+    Q_EMIT data->taskContext->PartChanged(data->fetched, requested);
     new_progress = total > 0 ? 5 + ((total_transferred / total) * 92) : 97;
     new_progress += (data->outstanding_writes > 0 ? (3.0 / data->outstanding_writes) : 3.0);
 }
@@ -1266,6 +1270,107 @@ utils::error::Result<void> OSTreeRepo::prune()
     return LINGLONG_OK;
 }
 
+// 初始化一个GVariantBuilder
+GVariantBuilder OSTreeRepo::initOStreePullOptions(const std::string &ref) noexcept
+{
+    std::array<const char *, 2> refs{ ref.c_str(), nullptr };
+    GVariantBuilder builder;
+    g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
+    std::string userAgent = "linglong/" LINGLONG_VERSION;
+    g_variant_builder_add(&builder,
+                          "{s@v}",
+                          "append-user-agent",
+                          g_variant_new_variant(g_variant_new_string(userAgent.c_str())));
+    g_variant_builder_add(&builder,
+                          "{s@v}",
+                          "disable-static-deltas",
+                          g_variant_new_variant(g_variant_new_boolean(true)));
+
+    g_variant_builder_add(&builder,
+                          "{s@v}",
+                          "refs",
+                          g_variant_new_variant(g_variant_new_strv(refs.data(), -1)));
+    return builder;
+}
+
+// 在pull之前获取commit size，用于计算进度，需要服务器支持ostree.sizes
+utils::error::Result<std::vector<guint64>>
+OSTreeRepo::getCommitSize(const std::string &remote, const std::string &refString) noexcept
+{
+    LINGLONG_TRACE("get commit size " + QString::fromStdString(refString));
+#if OSTREE_CHECK_VERSION(2020, 1)
+    g_autoptr(GError) gErr = nullptr;
+    GVariantBuilder builder = this->initOStreePullOptions(refString);
+    // 设置flags只获取commit的metadata
+    g_variant_builder_add(
+      &builder,
+      "{s@v}",
+      "flags",
+      g_variant_new_variant(g_variant_new_int32(OSTREE_REPO_PULL_FLAGS_COMMIT_ONLY)));
+    g_autoptr(GVariant) pull_options = g_variant_ref_sink(g_variant_builder_end(&builder));
+    // 获取commit的metadata
+    auto status = ostree_repo_pull_with_options(this->ostreeRepo.get(),
+                                                remote.c_str(),
+                                                pull_options,
+                                                nullptr,
+                                                nullptr,
+                                                &gErr);
+    if (status == FALSE) {
+        return LINGLONG_ERR("ostree_repo_pull", gErr);
+    }
+    // 使用refString获取commit的sha256
+    g_autofree char *resolved_rev = NULL;
+    if (!ostree_repo_resolve_rev(this->ostreeRepo.get(),
+                                 refString.c_str(),
+                                 FALSE,
+                                 &resolved_rev,
+                                 &gErr)) {
+        return LINGLONG_ERR("ostree_repo_resolve_rev", gErr);
+    }
+    // 使用sha256获取commit id
+    g_autoptr(GVariant) commit = NULL;
+    if (!ostree_repo_load_variant(this->ostreeRepo.get(),
+                                  OSTREE_OBJECT_TYPE_COMMIT,
+                                  resolved_rev,
+                                  &commit,
+                                  &gErr)) {
+        return LINGLONG_ERR("ostree_repo_load_variant", gErr);
+    }
+    g_autoptr(GPtrArray) sizes = NULL;
+    // 获取commit中的所有对象大小
+    if (!ostree_commit_get_object_sizes(commit, &sizes, &gErr))
+        return LINGLONG_ERR("ostree_commit_get_object_sizes", gErr);
+    // 计算需要下载的文件大小
+    guint64 needed_archived = 0;
+    // 计算需要解压的文件大小
+    guint64 needed_unpacked = 0;
+    // 计算需要下载的文件数量
+    guint64 needed_objects = 0;
+    // 遍历commit中的所有对象，如果对象不存在，则需要下载
+    for (guint i = 0; i < sizes->len; i++) {
+        OstreeCommitSizesEntry *entry = (OstreeCommitSizesEntry *)sizes->pdata[i];
+        gboolean exists;
+        if (!ostree_repo_has_object(this->ostreeRepo.get(),
+                                    entry->objtype,
+                                    entry->checksum,
+                                    &exists,
+                                    NULL,
+                                    &gErr))
+            return LINGLONG_ERR("ostree_repo_has_object", gErr);
+
+        // Object not in local repo, so we need to download it
+        if (!exists) {
+            needed_archived += entry->archived;
+            needed_unpacked += entry->unpacked;
+            needed_objects++;
+        }
+    }
+    return std::vector<guint64>{ needed_archived, needed_unpacked, needed_objects };
+#else
+    return LINGLONG_ERR("ostree_repo_pull_with_options is not supported");
+#endif
+}
+
 void OSTreeRepo::pull(service::PackageTask &taskContext,
                       const package::Reference &reference,
                       const std::string &module,
@@ -1283,26 +1388,24 @@ void OSTreeRepo::pull(service::PackageTask &taskContext,
     utils::Transaction transaction;
     auto *cancellable = taskContext.cancellable();
 
-    std::array<const char *, 2> refs{ refString.c_str(), nullptr };
     ostreeUserData data{ .taskContext = &taskContext };
+
+    auto sizes = this->getCommitSize(pullRepo.alias.value_or(pullRepo.name), refString);
+    if (!sizes.has_value()) {
+        qWarning() << "get commit size error: " << sizes.error().message();
+    } else if (sizes->size() >= 3) {
+        data.needed_archived = sizes->at(0);
+        data.needed_unpacked = sizes->at(1);
+        data.needed_objects = sizes->at(2);
+    }
+
     g_autoptr(OstreeAsyncProgress) progress =
       ostree_async_progress_new_and_connect(progress_changed, (void *)&data);
     Q_ASSERT(progress != nullptr);
 
     g_autoptr(GError) gErr = nullptr;
 
-    std::string userAgent = "linglong/" LINGLONG_VERSION;
-    GVariantBuilder builder;
-    g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
-    g_variant_builder_add(&builder,
-                          "{s@v}",
-                          "refs",
-                          g_variant_new_variant(g_variant_new_strv(refs.data(), -1)));
-    g_variant_builder_add(&builder,
-                          "{s@v}",
-                          "append-user-agent",
-                          g_variant_new_variant(g_variant_new_string(userAgent.c_str())));
-
+    auto builder = this->initOStreePullOptions(refString);
     g_autoptr(GVariant) pull_options = g_variant_ref_sink(g_variant_builder_end(&builder));
     // 这里不能使用g_main_context_push_thread_default，因为会阻塞Qt的事件循环
 
@@ -1332,19 +1435,9 @@ void OSTreeRepo::pull(service::PackageTask &taskContext,
         refString = ostreeSpecFromReference(reference, std::nullopt, module);
         qWarning() << "fallback to module runtime, pull " << QString::fromStdString(refString);
 
-        refs[0] = refString.c_str();
         g_clear_error(&gErr);
 
-        GVariantBuilder builder;
-        g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
-        g_variant_builder_add(&builder,
-                              "{s@v}",
-                              "refs",
-                              g_variant_new_variant(g_variant_new_strv(refs.data(), -1)));
-        g_variant_builder_add(&builder,
-                              "{s@v}",
-                              "append-user-agent",
-                              g_variant_new_variant(g_variant_new_string(userAgent.c_str())));
+        GVariantBuilder builder = this->initOStreePullOptions(refString);
 
         g_autoptr(GVariant) pull_options = g_variant_ref_sink(g_variant_builder_end(&builder));
 
@@ -1367,7 +1460,7 @@ void OSTreeRepo::pull(service::PackageTask &taskContext,
 
     g_clear_error(&gErr);
     if (ostree_repo_read_commit(this->ostreeRepo.get(),
-                                refs[0],
+                                refString.c_str(),
                                 &layerRootDir,
                                 &commit,
                                 cancellable,
@@ -1997,7 +2090,8 @@ utils::error::Result<void> OSTreeRepo::exportDir(const std::string &appID,
         if (is_regular_file) {
             // 如果有指定的后缀名，则只处理指定后缀名的文件
             if (fileSuffix.has_value()
-                && !endWithFunc(std::string_view(source_path.string()), std::string_view(fileSuffix.value()))) {
+                && !endWithFunc(std::string_view(source_path.string()),
+                                std::string_view(fileSuffix.value()))) {
                 continue;
             }
 
@@ -2042,7 +2136,7 @@ utils::error::Result<void> OSTreeRepo::exportDir(const std::string &appID,
                     if (ec) {
                         return LINGLONG_ERR("copy file failed: " + sourceNewPath, ec);
                     }
-                    
+
                     // TODO 这部分代码可以删除
                     exists = std::filesystem::exists(sourceNewPath, ec);
                     if (ec) {
@@ -2061,7 +2155,8 @@ utils::error::Result<void> OSTreeRepo::exportDir(const std::string &appID,
                         return LINGLONG_ERR("get hard link count", ec);
                     }
                     if (hard_link_count > 1) {
-                        auto ret = IniLikeFileRewrite(QFileInfo(sourceNewPath.c_str()), appID.c_str());
+                        auto ret =
+                          IniLikeFileRewrite(QFileInfo(sourceNewPath.c_str()), appID.c_str());
                         if (!ret) {
                             qWarning() << "rewrite file failed: " << ret.error().message();
                             continue;

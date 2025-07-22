@@ -360,6 +360,19 @@ ContainerCfgBuilder::appendEnv(const std::map<std::string, std::string> &envMap)
     return *this;
 }
 
+ContainerCfgBuilder &ContainerCfgBuilder::appendEnv(const std::string &env,
+                                                    const std::string &value,
+                                                    bool overwrite) noexcept
+{
+    if (overwrite || envAppend.find(env) == envAppend.end()) {
+        envAppend[env] = value;
+    } else {
+        std::cerr << "env " << env << " is already exist" << std::endl;
+    }
+
+    return *this;
+}
+
 ContainerCfgBuilder &ContainerCfgBuilder::bindHostRoot() noexcept
 {
     hostRootMount = {
@@ -703,12 +716,25 @@ bool ContainerCfgBuilder::buildMountHome() noexcept
     }
     environment["XDG_DATA_HOME"] = containerDataHome;
 
+    auto checkPrivatePath = [this](const std::filesystem::path &path) -> std::filesystem::path {
+        if (!privateMount) {
+            return std::filesystem::path{};
+        }
+
+        std::error_code ec;
+        if (std::filesystem::exists(privateAppDir / path, ec)) {
+            return privateAppDir / path;
+        }
+
+        return std::filesystem::path{};
+    };
+
     value = getenv("XDG_CONFIG_HOME");
     std::filesystem::path XDG_CONFIG_HOME =
       value ? std::filesystem::path{ value } : *homePath / ".config";
     std::filesystem::path XDGConfigHome = XDG_CONFIG_HOME;
-    auto privateConfigPath = privatePath / "config";
-    if (std::filesystem::exists(privateConfigPath, ec)) {
+    auto privateConfigPath = checkPrivatePath("config");
+    if (!privateConfigPath.empty()) {
         XDGConfigHome = privateConfigPath;
     }
     std::string containerConfigHome = containerHome + "/.config";
@@ -725,8 +751,8 @@ bool ContainerCfgBuilder::buildMountHome() noexcept
     std::filesystem::path XDG_CACHE_HOME =
       value ? std::filesystem::path{ value } : *homePath / ".cache";
     std::filesystem::path XDGCacheHome = XDG_CACHE_HOME;
-    auto privateCachePath = privatePath / "cache";
-    if (std::filesystem::exists(privateCachePath, ec)) {
+    auto privateCachePath = checkPrivatePath("cache");
+    if (!privateCachePath.empty()) {
         XDGCacheHome = privateCachePath;
     }
     std::string containerCacheHome = containerHome + "/.cache";
@@ -742,8 +768,8 @@ bool ContainerCfgBuilder::buildMountHome() noexcept
     value = getenv("XDG_STATE_HOME");
     std::filesystem::path XDG_STATE_HOME =
       value ? std::filesystem::path{ value } : *homePath / ".local" / "state";
-    auto privateStatePath = privatePath / "state";
-    if (std::filesystem::exists(privateStatePath, ec)) {
+    auto privateStatePath = checkPrivatePath("state");
+    if (!privateStatePath.empty()) {
         XDG_STATE_HOME = privateStatePath;
     }
     std::string containerStateHome = containerHome + "/.local/state";
@@ -1180,8 +1206,9 @@ bool ContainerCfgBuilder::buildMountLocalTime() noexcept
             isSymLink = true;
         }
         localtimeMount->emplace_back(Mount{ .destination = localtime.string(),
-                                            .options = isSymLink ? string_list{ "copy-symlink" }
-                                                                 : string_list{ "rbind", "ro" },
+                                            .options = isSymLink
+                                              ? string_list{ "rbind", "copy-symlink" }
+                                              : string_list{ "rbind", "ro" },
                                             .source = localtime,
                                             .type = "bind" });
     }
@@ -1226,7 +1253,7 @@ bool ContainerCfgBuilder::buildMountNetworkConf() noexcept
             }
 
             networkConfMount->emplace_back(Mount{ .destination = resolvConf.string(),
-                                                  .options = string_list{ "copy-symlink" },
+                                                  .options = string_list{ "rbind", "copy-symlink" },
                                                   .source = bundleResolvConf,
                                                   .type = "bind" });
         } else {
@@ -1770,12 +1797,11 @@ bool ContainerCfgBuilder::shouldFix(int node, std::filesystem::path &fixPath) no
         });
         return find != mount.options->end();
     };
-    // node should fix if the file 
+    // node should fix if the file
     // 1. is /etc/localtime or
     // 2. is not exist or
     // 3. is not a symlink but mount with option copy-symlink
-    if (getRelativePath(0, node) == "etc/localtime"
-        || !std::filesystem::exists(hostPath, ec)
+    if (getRelativePath(0, node) == "etc/localtime" || !std::filesystem::exists(hostPath, ec)
         || ((!std::filesystem::is_symlink(hostPath, ec)) && isCopySymlink(node))) {
         fixPath = std::move(hostPath);
         return true;
@@ -2024,7 +2050,7 @@ bool ContainerCfgBuilder::build() noexcept
         return false;
     }
 
-    if (!buildMountHome() || !buildTmp() || !buildPrivateDir() || !buildPrivateMapped()) {
+    if (!buildTmp() || !buildPrivateDir() || !buildMountHome() || !buildPrivateMapped()) {
         return false;
     }
 

@@ -513,14 +513,16 @@ ll-cli list --upgradable
     auto *repoEnableMirror =
       cliRepo->add_subcommand("enable-mirror", _("Enable mirror for the repo"));
     repoEnableMirror->usage(_("Usage: ll-cli repo enable-mirror [OPTIONS] ALIAS"));
-    repoEnableMirror->add_option("ALIAS", options.repoOptions.repoAlias, _("Alias of the repo name"))
+    repoEnableMirror
+      ->add_option("ALIAS", options.repoOptions.repoAlias, _("Alias of the repo name"))
       ->required()
       ->check(validatorString);
     // add repo sub command disable mirror
     auto *repoDisableMirror =
       cliRepo->add_subcommand("disable-mirror", _("Disable mirror for the repo"));
     repoDisableMirror->usage(_("Usage: ll-cli repo disable-mirror [OPTIONS] ALIAS"));
-    repoDisableMirror->add_option("ALIAS", options.repoOptions.repoAlias, _("Alias of the repo name"))
+    repoDisableMirror
+      ->add_option("ALIAS", options.repoOptions.repoAlias, _("Alias of the repo name"))
       ->required()
       ->check(validatorString);
 
@@ -583,8 +585,12 @@ ll-cli list --upgradable
     auto cliLayerDir =
       commandParser.add_subcommand("dir", "Get the layer directory of app(base or runtime)")
         ->group(CliHiddenGroup);
+    cliLayerDir->footer("This subcommand is for internal use only currently");
     cliLayerDir->add_option("APP", options.appid, _("Specify the installed app(base or runtime)"))
       ->required()
+      ->check(validatorString);
+    cliLayerDir->add_option("--module", options.module, _("Specify a module"))
+      ->type_name("MODULE")
       ->check(validatorString);
 
     auto res = transformOldExec(argc, argv);

@@ -17,8 +17,9 @@
 namespace linglong::generator {
 
 enum class ANNOTATION {
-    ANNOTATION_APPID,
-    ANNOTATION_BASEDIR,
+    APPID,
+    BASEDIR,
+    LAST_PID,
 };
 
 class ContainerCfgBuilder
@@ -200,7 +201,6 @@ private:
     bool buildMountRuntime() noexcept;
     bool buildMountApp() noexcept;
     bool buildMountHome() noexcept;
-    bool buildTmp() noexcept;
     bool buildPrivateDir() noexcept;
     bool buildPrivateMapped() noexcept;
     bool buildMountIPC() noexcept;

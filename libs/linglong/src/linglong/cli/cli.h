@@ -17,7 +17,7 @@
 #include "linglong/runtime/container_builder.h"
 #include "linglong/utils/error/error.h"
 
-#include <CLI/App.hpp>
+#include <CLI/CLI.hpp>
 
 namespace linglong::runtime {
 class RunContext;
@@ -44,6 +44,7 @@ struct CliOptions
 {
     std::vector<std::string> filePaths;
     std::vector<std::string> fileUrls;
+    std::vector<std::string> envs;
     std::string workDir;
     std::string appid;
     std::string instance;

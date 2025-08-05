@@ -111,18 +111,16 @@ Describes the source information required for the project. `sources` is a list a
 sources:
   - kind: git
     url: https://github.com/linuxdeepin/deepin-calculator.git
-    version: master # or tag
-    commit: d7e207b4a71bbd97f7d818de5044228c1a6e2c92 # Optional, for specifying the exact commit
+    commit: d7e207b4a71bbd97f7d818de5044228c1a6e2c92 #Branch, tag or commit, used to precisely specify the commit
     name: deepin-calculator.git # Optional, specifies the directory name after download
 ```
 
-| Name    | Description                                                                        | Required (within a single source) |
-| ------- | ---------------------------------------------------------------------------------- | --------------------------------- |
-| kind    | `git`, indicates download using the git tool.                                      | Yes                               |
-| url     | Source repository address                                                          | Yes                               |
-| version | Branch or tag of the source repository                                             | No (defaults to the main branch)  |
-| commit  | Hash value of a specific commit, used for precise checkout                         | No                                |
-| name    | Optional, specifies the subdirectory name under `linglong/sources` after download. | No                                |
+| Name   | Description                                                                          | Required (within a single source) |
+| ------ | ------------------------------------------------------------------------------------ | --------------------------------- |
+| kind   | `git`, indicates download using the git tool.                                        | Yes                               |
+| url    | Source repository address                                                            | Yes                               |
+| commit | Source code repository branch, tag, or hash value of a commit for accurate detection | Yes                               |
+| name   | Optional, specifies the subdirectory name under `linglong/sources` after download.   | No                                |
 
 #### File Type
 

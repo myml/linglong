@@ -662,6 +662,7 @@ int Cli::run(const RunOptions &options)
     auto res = runContext.resolve(*curAppRef);
     if (!res) {
         this->printer.printErr(res.error());
+        return -1;
     }
 
     const auto &appLayerItem = runContext.getCachedAppItem();

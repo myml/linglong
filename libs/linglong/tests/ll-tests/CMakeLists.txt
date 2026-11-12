@@ -27,6 +27,7 @@ pfl_add_executable(
   src/linglong/builder/project_lock_test.cpp
   src/linglong/builder/project_validation_test.cpp
   src/linglong/cli/cli_printer_test.cpp
+  src/linglong/cli/error_presenter_test.cpp
   src/linglong/cli/cli_test.cpp
   src/linglong/common/gkeyfile_wrapper_test.cpp
   src/linglong/common/global/initialize_test.cpp

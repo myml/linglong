@@ -792,9 +792,13 @@ TEST_F(RunContextTest, resolveHostDynamicPaths)
     }
 
     ASSERT_TRUE(config.hostDynamic.has_value());
-    EXPECT_EQ(config.hostDynamic->size(), expectedCount);
+    // 发行版补丁会往 hostDynamic 里追加自己的路径（deepin 打包补丁加了 5 条），
+    // 数量做等值断言会在带补丁的构建里失败；改成校验每个挂载目标都真实存在。
     for (const auto &mount : *config.hostDynamic) {
         EXPECT_TRUE(mount.srcType.has_value());
+        std::error_code ec;
+        EXPECT_TRUE(std::filesystem::exists(mount.destination, ec)) << mount.destination;
+        EXPECT_FALSE(ec) << ec.message();
     }
 }
 

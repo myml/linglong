@@ -11,6 +11,7 @@
 #include "linglong/package/layer_dir.h"
 #include "linglong/package/reference.h"
 #include "linglong/package_manager/task.h"
+#include "configure.h"
 #include "linglong/repo/ostree_repo.h"
 
 #include <algorithm>
@@ -832,8 +833,11 @@ TEST_F(RealRepoExportTest, ExportDirRewritesApplicationEntriesInPlace)
 
     EXPECT_TRUE(std::filesystem::exists(desktop));
     EXPECT_TRUE(std::filesystem::exists(desktop.string() + ".linyaps.original"));
+    // 导出的桌面文件落在哪个目录由构建期的 LINGLONG_EXPORT_PATH 决定：
+    // 默认是 share，deb 打包传的是 apps/share，这里不能写死。
+    const auto applicationsDir = std::string{ LINGLONG_EXPORT_PATH } + "/applications";
     EXPECT_TRUE(
-      std::filesystem::exists(entries / "share" / "applications" / "com.example.app.desktop"));
+      std::filesystem::exists(entries / applicationsDir / "com.example.app.desktop"));
 }
 
 TEST_F(RealRepoExportTest, ExportAppBinariesCreatesExecutableWrapperAndSkipsOtherModules)
